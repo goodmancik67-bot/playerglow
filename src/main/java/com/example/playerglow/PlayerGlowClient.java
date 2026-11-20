@@ -10,9 +10,13 @@ import net.minecraft.client.util.InputUtil;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.decoration.ArmorStandEntity;
+import net.minecraft.entity.decoration.EndCrystalEntity;
 import net.minecraft.entity.effect.StatusEffectInstance;
 import net.minecraft.entity.effect.StatusEffects;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.item.Items;
+import net.minecraft.util.Hand;
+import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 import org.lwjgl.glfw.GLFW;
@@ -21,6 +25,8 @@ public class PlayerGlowClient implements ClientModInitializer {
 	public static boolean enabled = false;
 	public static boolean xray = false;
 	public static boolean aimbot = false;
+	public static boolean crystalAura = false;
+	public static boolean triggerbot = false;
 	public static boolean aimOnlyWhileAttacking = true;
 	public static boolean aimPlayers = true;
 	public static boolean aimMobs = true;
@@ -31,6 +37,7 @@ public class PlayerGlowClient implements ClientModInitializer {
 
 	private static KeyBinding menuKey;
 	private static boolean nightVisionApplied = false;
+	private static int crystalDelay = 0;
 
 	@Override
 	public void onInitializeClient() {
@@ -48,6 +55,8 @@ public class PlayerGlowClient implements ClientModInitializer {
 			}
 			tickNightVision(client);
 			tickAimbot(client);
+			tickTriggerbot(client);
+			tickCrystalAura(client);
 		});
 	}
 
@@ -105,5 +114,50 @@ public class PlayerGlowClient implements ClientModInitializer {
 		float k = 1f / Math.max(1f, aimSmooth);
 		me.setYaw(me.getYaw() + MathHelper.wrapDegrees(bestYaw - me.getYaw()) * k);
 		me.setPitch(MathHelper.clamp(me.getPitch() + (bestPitch - me.getPitch()) * k, -90f, 90f));
+	}
+
+	private static void tickTriggerbot(MinecraftClient client) {
+		if (!triggerbot || client.player == null || client.world == null
+				|| client.interactionManager == null || client.currentScreen != null) return;
+		if (!(client.crosshairTarget instanceof EntityHitResult hit)) return;
+
+		ClientPlayerEntity me = client.player;
+		Entity target = hit.getEntity();
+		if (!(target instanceof LivingEntity living) || !living.isAlive()) return;
+		if (target instanceof ArmorStandEntity || target.isSpectator()) return;
+		boolean isPlayer = target instanceof PlayerEntity;
+		if (isPlayer ? !aimPlayers : !aimMobs) return;
+
+		if (me.getAttackCooldownProgress(0.5f) < 0.95f) return;
+		client.interactionManager.attackEntity(me, target);
+		me.swingHand(Hand.MAIN_HAND);
+	}
+
+	private static void tickCrystalAura(MinecraftClient client) {
+		if (!crystalAura || client.player == null || client.world == null
+				|| client.interactionManager == null || client.currentScreen != null) return;
+		if (crystalDelay > 0) {
+			crystalDelay--;
+			return;
+		}
+		ClientPlayerEntity me = client.player;
+		if (!client.options.useKey.isPressed()) return;
+		if (!me.getMainHandStack().isOf(Items.END_CRYSTAL)) return;
+
+		EndCrystalEntity best = null;
+		double bestDist = 4.5 * 4.5;
+		for (EndCrystalEntity crystal : client.world.getEntitiesByClass(
+				EndCrystalEntity.class, me.getBoundingBox().expand(5.0), e -> e.isAlive())) {
+			double d = me.getEyePos().squaredDistanceTo(crystal.getPos());
+			if (d <= bestDist) {
+				bestDist = d;
+				best = crystal;
+			}
+		}
+		if (best == null) return;
+
+		client.interactionManager.attackEntity(me, best);
+		me.swingHand(Hand.MAIN_HAND);
+		crystalDelay = 2;
 	}
 }
