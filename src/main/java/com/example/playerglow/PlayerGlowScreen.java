@@ -5,53 +5,73 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.text.Text;
+import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Random;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.DoubleConsumer;
 import java.util.function.DoubleSupplier;
+import java.util.function.IntConsumer;
+import java.util.function.IntSupplier;
 
-import static com.example.playerglow.UiDraw.ACCENT;
-import static com.example.playerglow.UiDraw.GRAY;
+import static com.example.playerglow.UiDraw.BORDER;
+import static com.example.playerglow.UiDraw.C1;
+import static com.example.playerglow.UiDraw.C2;
+import static com.example.playerglow.UiDraw.CARD_OFF;
+import static com.example.playerglow.UiDraw.MUTED;
+import static com.example.playerglow.UiDraw.TEXT;
+import static com.example.playerglow.UiDraw.TRACK;
 import static com.example.playerglow.UiDraw.WHITE;
+import static com.example.playerglow.UiDraw.WIN_BG;
 import static com.example.playerglow.UiDraw.alpha;
 import static com.example.playerglow.UiDraw.lerp;
 
 public class PlayerGlowScreen extends Screen {
-	private static final int PANEL_BODY = 0xC8181818;
-	private static final int PANEL_HEAD = 0xE00E0E0E;
-	private static final int TRACK = 0xFF343434;
+	// design size of the window (GUI units); everything is laid out in this space
+	private static final int W = 372, H = 272, SB = 98, WRAD = 14;
+	private static final int CX = SB + 12, CW = W - SB - 24;
 
-	private static final int PAGE_MAIN = 0;
-	private static final int PAGE_AIMBOT = 1;
-	private static final int PAGE_CRYSTAL = 2;
-	private static final int PAGE_ESP = 3;
+	private static final int CAT_COMBAT = 0, CAT_RENDER = 1;
+	private static final int VIEW_LIST = -1, VIEW_AIMBOT = 0, VIEW_CRYSTAL = 1, VIEW_ESP = 2, VIEW_HAT = 3;
 
-	private static final int ROW_H = 15;
-	private static final int HEAD_H = 16;
-	private static final int SLIDER_H = 24;
-	private static final int BANNER_H = 22;
-	private static final int RAD = 6;
+	// window position offset (kept while the game is running)
+	private static float offX = 0f, offY = 0f;
 
-	private static final float OPEN_SEC = 0.45f;
-	private static final float CLOSE_SEC = 0.35f;
-	private static final float PAGE_SEC = 0.30f;
+	private static final class Module {
+		final String name, desc;
+		final int cat, gearView;
+		final BooleanSupplier get;
+		final Consumer<Boolean> set;
+		float x, y, w, h;
+		float on, hover, gearHover, rip = -1f;
+		boolean visible;
 
-	private static final boolean[][] GEAR = buildGear();
+		Module(String name, String desc, int cat, int gearView, BooleanSupplier get, Consumer<Boolean> set) {
+			this.name = name;
+			this.desc = desc;
+			this.cat = cat;
+			this.gearView = gearView;
+			this.get = get;
+			this.set = set;
+			this.on = get.getAsBoolean() ? 1f : 0f;
+		}
+
+		boolean contains(double mx, double my) {
+			return visible && mx >= x && mx < x + w && my >= y && my < y + h;
+		}
+	}
 
 	private static final class Toggle {
 		final String label;
-		final int gearPage;
 		final BooleanSupplier get;
 		final Consumer<Boolean> set;
-		int x, y, w, h;
-		float on, hover, gearHover, pulse;
+		float x, y, w, h, on, hover;
 
-		Toggle(String label, int gearPage, BooleanSupplier get, Consumer<Boolean> set) {
+		Toggle(String label, BooleanSupplier get, Consumer<Boolean> set) {
 			this.label = label;
-			this.gearPage = gearPage;
 			this.get = get;
 			this.set = set;
 			this.on = get.getAsBoolean() ? 1f : 0f;
@@ -59,10 +79,6 @@ public class PlayerGlowScreen extends Screen {
 
 		boolean contains(double mx, double my) {
 			return mx >= x && mx < x + w && my >= y && my < y + h;
-		}
-
-		boolean gearContains(double mx, double my) {
-			return gearPage >= 0 && mx >= x + w - 18 && mx < x + w && my >= y && my < y + h;
 		}
 	}
 
@@ -72,10 +88,11 @@ public class PlayerGlowScreen extends Screen {
 		final DoubleSupplier get;
 		final DoubleConsumer set;
 		final String fmt;
-		int x, y, w, h;
-		float hover;
+		final boolean rainbow;
+		float x, y, w, h, hover;
 
-		Slider(String label, double min, double max, double step, DoubleSupplier get, DoubleConsumer set, String fmt) {
+		Slider(String label, double min, double max, double step, DoubleSupplier get, DoubleConsumer set,
+				String fmt, boolean rainbow) {
 			this.label = label;
 			this.min = min;
 			this.max = max;
@@ -83,63 +100,217 @@ public class PlayerGlowScreen extends Screen {
 			this.get = get;
 			this.set = set;
 			this.fmt = fmt;
+			this.rainbow = rainbow;
 		}
 
 		boolean contains(double mx, double my) {
 			return mx >= x && mx < x + w && my >= y && my < y + h;
 		}
+
+		float trackX() { return x + 12; }
+		float trackW() { return w - 24; }
 	}
 
-	private record Panel(String title, int x, int y, int w, int h) {}
+	private static final class Swatches {
+		final IntSupplier get;
+		final IntConsumer set;
+		float x, y, w, h;
 
+		Swatches(IntSupplier get, IntConsumer set) {
+			this.get = get;
+			this.set = set;
+		}
+
+		float cellX(int i) {
+			int n = UiDraw.PALETTE.length;
+			float inner = w - 28;
+			return x + 14 + inner * (i + 0.5f) / n;
+		}
+	}
+
+	private static final class Flake {
+		float x, y, speed, size, phase, rot, rotSpeed, alpha;
+	}
+
+	private static final class Spark {
+		float x, y, vx, vy, age, life, size;
+	}
+
+	private final List<Module> modules = new ArrayList<>();
 	private final List<Toggle> toggles = new ArrayList<>();
 	private final List<Slider> sliders = new ArrayList<>();
-	private final List<Panel> panels = new ArrayList<>();
+	private Swatches swatches = null;
+	private final List<Flake> flakes = new ArrayList<>();
+	private final List<Spark> sparks = new ArrayList<>();
+	private final Random rnd = new Random();
 
-	private int page = PAGE_MAIN;
-	private int bannerX, bannerY, bannerW;
-	private int closeX, closeY;
-	private int backX, backY;
+	private int cat = CAT_COMBAT;
+	private int view = VIEW_LIST;
+	private String viewTitle = "";
+	private String query = "";
+	private boolean searchFocus = false;
 
-	private Slider dragging = null;
-	private float lastOy = 0f;
-	private float backHover = 0f, closeHover = 0f;
-	private float fade = 1f;
+	private final float[] catOn = {1f, 0f};
+	private float backHover = 0f, exitHover = 0f;
+	private Slider dragSlider = null;
+	private boolean movingWindow = false;
 	private boolean closing = false;
+
 	private long openStart = System.nanoTime();
 	private long closeStart = 0L;
-	private long pageStart = 0L;
+	private long contentStart = 0L;
 	private long lastNanos = System.nanoTime();
+
+	// last frame transform, used for mouse mapping
+	private float tx = 0f, ty = 0f, ts = 1f;
 
 	public PlayerGlowScreen() {
 		super(Text.literal("Playboi Carti Client"));
-		pageStart = openStart - 1_000_000_000L;
+		contentStart = openStart - 1_000_000_000L;
+
+		modules.add(new Module("Aimbot", "Наводит прицел на\nигроков и мобов", CAT_COMBAT, VIEW_AIMBOT,
+				() -> PlayerGlowClient.aimbot, v -> PlayerGlowClient.aimbot = v));
+		modules.add(new Module("CrystalAura", "Ставит кристалл на обсидиан\nи сам его взрывает", CAT_COMBAT, VIEW_CRYSTAL,
+				() -> PlayerGlowClient.crystalAura, v -> PlayerGlowClient.crystalAura = v));
+		modules.add(new Module("TriggerBot", "Бьёт цель в прицеле\nровно в тайминг", CAT_COMBAT, -1,
+				() -> PlayerGlowClient.triggerbot, v -> PlayerGlowClient.triggerbot = v));
+		modules.add(new Module("Criticals", "Каждый удар\nстановится критом", CAT_COMBAT, -1,
+				() -> PlayerGlowClient.criticals, v -> PlayerGlowClient.criticals = v));
+
+		modules.add(new Module("Player Glow", "3D-бокс вокруг игроков\nи мобов сквозь стены", CAT_RENDER, VIEW_ESP,
+				() -> PlayerGlowClient.enabled, v -> PlayerGlowClient.enabled = v));
+		modules.add(new Module("China Hat", "Шляпа над головой\nигроков и мобов", CAT_RENDER, VIEW_HAT,
+				() -> PlayerGlowClient.chinaHat, v -> PlayerGlowClient.chinaHat = v));
+		modules.add(new Module("X-Ray", "Показывает только руды\nи включает ночное зрение", CAT_RENDER, -1,
+				() -> PlayerGlowClient.xray,
+				v -> {
+					PlayerGlowClient.xray = v;
+					MinecraftClient.getInstance().worldRenderer.reload();
+				}));
+		modules.add(new Module("Target HUD", "Здоровье цели на 2 секунды\nпосле вашего удара", CAT_RENDER, -1,
+				() -> PlayerGlowClient.targetHud, v -> PlayerGlowClient.targetHud = v));
+		modules.add(new Module("Hit Marker", "Маркер в прицеле\nпри попадании", CAT_RENDER, -1,
+				() -> PlayerGlowClient.hitMarker, v -> PlayerGlowClient.hitMarker = v));
+		modules.add(new Module("Info HUD", "FPS, координаты\nи направление взгляда", CAT_RENDER, -1,
+				() -> PlayerGlowClient.infoHud, v -> PlayerGlowClient.infoHud = v));
 	}
 
-	private static boolean[][] buildGear() {
-		boolean[][] g = new boolean[9][9];
-		for (int i = 0; i < 9; i++) {
-			for (int j = 0; j < 9; j++) {
-				double d = Math.hypot(i - 4, j - 4);
-				g[i][j] = d <= 3.4 && d >= 1.6;
-			}
-		}
-		int[][] teeth = {
-				{4, 0}, {3, 0}, {5, 0}, {4, 8}, {3, 8}, {5, 8},
-				{0, 4}, {0, 3}, {0, 5}, {8, 4}, {8, 3}, {8, 5},
-				{1, 1}, {7, 1}, {1, 7}, {7, 7}
-		};
-		for (int[] t : teeth) {
-			g[t[0]][t[1]] = true;
-		}
-		return g;
+	// ---------- layout ----------
+
+	@Override
+	protected void init() {
+		layout();
 	}
 
-	private void setPage(int p) {
-		page = p;
-		dragging = null;
-		pageStart = System.nanoTime();
-		this.init();
+	private void layout() {
+		toggles.clear();
+		sliders.clear();
+		swatches = null;
+
+		if (view == VIEW_LIST) {
+			layoutList();
+		} else {
+			layoutSettings();
+		}
+	}
+
+	private boolean matches(Module m) {
+		if (!query.isEmpty()) {
+			return m.name.toLowerCase().contains(query.toLowerCase());
+		}
+		return m.cat == cat;
+	}
+
+	private void layoutList() {
+		float cw = (CW - 8) / 2f;
+		float ch = 44f;
+		int i = 0;
+		for (Module m : modules) {
+			m.visible = matches(m);
+			if (!m.visible) continue;
+			m.x = CX + (i % 2) * (cw + 8);
+			m.y = 50 + (i / 2) * (ch + 8);
+			m.w = cw;
+			m.h = ch;
+			i++;
+		}
+	}
+
+	private void layoutSettings() {
+		for (Module m : modules) m.visible = false;
+
+		List<Toggle> ts = new ArrayList<>();
+		List<Slider> ss = new ArrayList<>();
+		Swatches sw = null;
+
+		if (view == VIEW_AIMBOT) {
+			viewTitle = "Aimbot";
+			ts.add(new Toggle("Hold attack", () -> PlayerGlowClient.aimOnlyWhileAttacking, v -> PlayerGlowClient.aimOnlyWhileAttacking = v));
+			ts.add(new Toggle("Players", () -> PlayerGlowClient.aimPlayers, v -> PlayerGlowClient.aimPlayers = v));
+			ts.add(new Toggle("Mobs", () -> PlayerGlowClient.aimMobs, v -> PlayerGlowClient.aimMobs = v));
+			ss.add(new Slider("Range", 1.0, 8.0, 0.1, () -> PlayerGlowClient.aimRange, v -> PlayerGlowClient.aimRange = v, "%.1f", false));
+			ss.add(new Slider("FOV", 30.0, 360.0, 5.0, () -> PlayerGlowClient.aimFov, v -> PlayerGlowClient.aimFov = (float) v, "%.0f deg", false));
+			ss.add(new Slider("Smooth", 1.0, 20.0, 0.5, () -> PlayerGlowClient.aimSmooth, v -> PlayerGlowClient.aimSmooth = (float) v, "%.1f", false));
+		} else if (view == VIEW_CRYSTAL) {
+			viewTitle = "CrystalAura";
+			ts.add(new Toggle("Auto place", () -> PlayerGlowClient.crystalAutoPlace, v -> PlayerGlowClient.crystalAutoPlace = v));
+			ts.add(new Toggle("Auto break", () -> PlayerGlowClient.crystalAutoBreak, v -> PlayerGlowClient.crystalAutoBreak = v));
+			ss.add(new Slider("Range", 1.0, 6.0, 0.5, () -> PlayerGlowClient.crystalRange, v -> PlayerGlowClient.crystalRange = v, "%.1f", false));
+			ss.add(new Slider("Delay", 0.0, 10.0, 1.0, () -> PlayerGlowClient.crystalDelayTicks, v -> PlayerGlowClient.crystalDelayTicks = (float) v, "%.0f tick", false));
+		} else if (view == VIEW_ESP) {
+			viewTitle = "Player Glow";
+			ts.add(new Toggle("Players", () -> PlayerGlowClient.espPlayers, v -> PlayerGlowClient.espPlayers = v));
+			ts.add(new Toggle("Mobs", () -> PlayerGlowClient.espMobs, v -> PlayerGlowClient.espMobs = v));
+			ts.add(new Toggle("3D Box", () -> PlayerGlowClient.espBox, v -> PlayerGlowClient.espBox = v));
+			sw = new Swatches(() -> PlayerGlowClient.espColor, v -> PlayerGlowClient.espColor = v);
+			ss.add(new Slider("Hue", 0.0, 360.0, 1.0,
+					() -> UiDraw.hueOf(PlayerGlowClient.espColor),
+					v -> PlayerGlowClient.espColor = UiDraw.hsv((float) v, 0.75f, 1f), "%.0f", true));
+			ss.add(new Slider("Opacity", 10.0, 100.0, 5.0,
+					() -> PlayerGlowClient.espAlpha * 100.0, v -> PlayerGlowClient.espAlpha = (float) (v / 100.0), "%.0f%%", false));
+		} else {
+			viewTitle = "China Hat";
+			ts.add(new Toggle("Players", () -> PlayerGlowClient.hatPlayers, v -> PlayerGlowClient.hatPlayers = v));
+			ts.add(new Toggle("Mobs", () -> PlayerGlowClient.hatMobs, v -> PlayerGlowClient.hatMobs = v));
+			sw = new Swatches(() -> PlayerGlowClient.hatColor, v -> PlayerGlowClient.hatColor = v);
+			ss.add(new Slider("Hue", 0.0, 360.0, 1.0,
+					() -> UiDraw.hueOf(PlayerGlowClient.hatColor),
+					v -> PlayerGlowClient.hatColor = UiDraw.hsv((float) v, 0.75f, 1f), "%.0f", true));
+			ss.add(new Slider("Opacity", 10.0, 100.0, 5.0,
+					() -> PlayerGlowClient.hatAlpha * 100.0, v -> PlayerGlowClient.hatAlpha = (float) (v / 100.0), "%.0f%%", false));
+		}
+
+		float y = 50;
+		for (Toggle t : ts) {
+			t.x = CX; t.y = y; t.w = CW; t.h = 26;
+			toggles.add(t);
+			y += 30;
+		}
+		if (sw != null) {
+			sw.x = CX; sw.y = y; sw.w = CW; sw.h = 30;
+			swatches = sw;
+			y += 34;
+		}
+		for (Slider s : ss) {
+			s.x = CX; s.y = y; s.w = CW; s.h = 36;
+			sliders.add(s);
+			y += 40;
+		}
+	}
+
+	private void setView(int v) {
+		view = v;
+		dragSlider = null;
+		searchFocus = false;
+		contentStart = System.nanoTime();
+		layout();
+	}
+
+	private void setCat(int c) {
+		cat = c;
+		query = "";
+		contentStart = System.nanoTime();
+		layout();
 	}
 
 	@Override
@@ -147,173 +318,49 @@ public class PlayerGlowScreen extends Screen {
 		if (!closing) {
 			closing = true;
 			closeStart = System.nanoTime();
-			dragging = null;
+			dragSlider = null;
 		}
-	}
-
-	// ---------- layout ----------
-
-	@Override
-	protected void init() {
-		toggles.clear();
-		sliders.clear();
-		panels.clear();
-
-		if (page == PAGE_MAIN) {
-			buildMain();
-		} else if (page == PAGE_AIMBOT) {
-			List<Toggle> ts = new ArrayList<>();
-			ts.add(new Toggle("Hold attack", -1,
-					() -> PlayerGlowClient.aimOnlyWhileAttacking, v -> PlayerGlowClient.aimOnlyWhileAttacking = v));
-			ts.add(new Toggle("Players", -1,
-					() -> PlayerGlowClient.aimPlayers, v -> PlayerGlowClient.aimPlayers = v));
-			ts.add(new Toggle("Mobs", -1,
-					() -> PlayerGlowClient.aimMobs, v -> PlayerGlowClient.aimMobs = v));
-			List<Slider> ss = new ArrayList<>();
-			ss.add(new Slider("Range", 1.0, 8.0, 0.1,
-					() -> PlayerGlowClient.aimRange, v -> PlayerGlowClient.aimRange = v, "%.1f"));
-			ss.add(new Slider("FOV", 30.0, 360.0, 5.0,
-					() -> PlayerGlowClient.aimFov, v -> PlayerGlowClient.aimFov = (float) v, "%.0f deg"));
-			ss.add(new Slider("Smooth", 1.0, 20.0, 0.5,
-					() -> PlayerGlowClient.aimSmooth, v -> PlayerGlowClient.aimSmooth = (float) v, "%.1f"));
-			buildSettings("Aimbot", ts, ss);
-		} else if (page == PAGE_CRYSTAL) {
-			List<Toggle> ts = new ArrayList<>();
-			ts.add(new Toggle("Auto place", -1,
-					() -> PlayerGlowClient.crystalAutoPlace, v -> PlayerGlowClient.crystalAutoPlace = v));
-			ts.add(new Toggle("Auto break", -1,
-					() -> PlayerGlowClient.crystalAutoBreak, v -> PlayerGlowClient.crystalAutoBreak = v));
-			List<Slider> ss = new ArrayList<>();
-			ss.add(new Slider("Range", 1.0, 6.0, 0.5,
-					() -> PlayerGlowClient.crystalRange, v -> PlayerGlowClient.crystalRange = v, "%.1f"));
-			ss.add(new Slider("Delay", 0.0, 10.0, 1.0,
-					() -> PlayerGlowClient.crystalDelayTicks, v -> PlayerGlowClient.crystalDelayTicks = (float) v, "%.0f tick"));
-			buildSettings("CrystalAura", ts, ss);
-		} else {
-			List<Toggle> ts = new ArrayList<>();
-			ts.add(new Toggle("Players", -1,
-					() -> PlayerGlowClient.espPlayers, v -> PlayerGlowClient.espPlayers = v));
-			ts.add(new Toggle("Mobs", -1,
-					() -> PlayerGlowClient.espMobs, v -> PlayerGlowClient.espMobs = v));
-			ts.add(new Toggle("China hat", -1,
-					() -> PlayerGlowClient.chinaHat, v -> PlayerGlowClient.chinaHat = v));
-			buildSettings("Player Glow", ts, new ArrayList<>());
-		}
-
-		closeX = bannerX + bannerW - 16;
-		closeY = bannerY + 5;
-	}
-
-	private void buildMain() {
-		int gap = 8;
-		int pw = Math.min(126, (this.width - 8 - gap) / 2);
-		int total = pw * 2 + gap;
-		int visualsH = HEAD_H + ROW_H * 3 + 5;
-		int combatH = HEAD_H + ROW_H * 4 + 5;
-		int groupH = BANNER_H + 8 + Math.max(visualsH, combatH);
-		int top = Math.max(6, (this.height - groupH) / 2);
-
-		bannerX = (this.width - total) / 2;
-		bannerY = top;
-		bannerW = total;
-
-		int py = top + BANNER_H + 8;
-		int vx = bannerX;
-		int cx = bannerX + pw + gap;
-		panels.add(new Panel("Visuals", vx, py, pw, visualsH));
-		panels.add(new Panel("Combat", cx, py, pw, combatH));
-
-		addRow(vx, pw, py, 0, new Toggle("Player Glow", PAGE_ESP,
-				() -> PlayerGlowClient.enabled, v -> PlayerGlowClient.enabled = v));
-		addRow(vx, pw, py, 1, new Toggle("X-Ray", -1,
-				() -> PlayerGlowClient.xray,
-				v -> {
-					PlayerGlowClient.xray = v;
-					MinecraftClient.getInstance().worldRenderer.reload();
-				}));
-		addRow(vx, pw, py, 2, new Toggle("Target HUD", -1,
-				() -> PlayerGlowClient.targetHud, v -> PlayerGlowClient.targetHud = v));
-
-		addRow(cx, pw, py, 0, new Toggle("Aimbot", PAGE_AIMBOT,
-				() -> PlayerGlowClient.aimbot, v -> PlayerGlowClient.aimbot = v));
-		addRow(cx, pw, py, 1, new Toggle("CrystalAura", PAGE_CRYSTAL,
-				() -> PlayerGlowClient.crystalAura, v -> PlayerGlowClient.crystalAura = v));
-		addRow(cx, pw, py, 2, new Toggle("TriggerBot", -1,
-				() -> PlayerGlowClient.triggerbot, v -> PlayerGlowClient.triggerbot = v));
-		addRow(cx, pw, py, 3, new Toggle("Criticals", -1,
-				() -> PlayerGlowClient.criticals, v -> PlayerGlowClient.criticals = v));
-	}
-
-	private void buildSettings(String title, List<Toggle> ts, List<Slider> ss) {
-		int pw = Math.min(172, this.width - 8);
-		int panelH = HEAD_H + ROW_H * ts.size() + (ss.isEmpty() ? 0 : 6 + SLIDER_H * ss.size()) + 6;
-		int groupH = BANNER_H + 8 + panelH;
-		int top = Math.max(6, (this.height - groupH) / 2);
-
-		bannerX = (this.width - pw) / 2;
-		bannerY = top;
-		bannerW = pw;
-
-		int py = top + BANNER_H + 8;
-		int px = bannerX;
-		panels.add(new Panel(title, px, py, pw, panelH));
-		backX = px + 4;
-		backY = py + 1;
-
-		for (int i = 0; i < ts.size(); i++) {
-			addRow(px, pw, py, i, ts.get(i));
-		}
-		int sy = py + HEAD_H + ROW_H * ts.size() + 6;
-		for (int i = 0; i < ss.size(); i++) {
-			Slider s = ss.get(i);
-			s.x = px + 9;
-			s.w = pw - 18;
-			s.y = sy + i * SLIDER_H;
-			s.h = SLIDER_H;
-			sliders.add(s);
-		}
-	}
-
-	private void addRow(int px, int pw, int py, int row, Toggle t) {
-		t.x = px;
-		t.w = pw;
-		t.y = py + HEAD_H + row * ROW_H;
-		t.h = ROW_H;
-		toggles.add(t);
 	}
 
 	// ---------- helpers ----------
 
-	private int fa(int color) {
-		return alpha(color, fade);
-	}
-
-	private void txt(DrawContext c, String s, int x, int y, int color) {
-		UiDraw.text(c, this.textRenderer, s, x, y, fa(color), true);
-	}
-
-	private void ctxt(DrawContext c, String s, int cx, int y, int color) {
-		int w = this.textRenderer.getWidth(UiDraw.fnt(s));
-		txt(c, s, cx - w / 2, y, color);
-	}
-
-	private void gtxt(DrawContext c, String s, int x, int y, int color, float glow) {
-		UiDraw.glowText(c, this.textRenderer, s, x, y, fa(color), glow * fade);
-	}
-
-	private void drawGear(DrawContext c, int x, int y, int color) {
-		for (int i = 0; i < 9; i++) {
-			for (int j = 0; j < 9; j++) {
-				if (GEAR[i][j]) {
-					c.fill(x + i, y + j, x + i + 1, y + j + 1, color);
-				}
-			}
-		}
-	}
-
 	private static float smooth(float t) {
 		t = Math.max(0f, Math.min(1f, t));
 		return t * t * (3f - 2f * t);
+	}
+
+	private float fade = 1f;
+
+	private int fa(int c) {
+		return alpha(c, fade);
+	}
+
+	private void txt(DrawContext c, String s, float x, float y, float scale, int color) {
+		UiDraw.txt(c, this.textRenderer, s, x, y, scale, fa(color));
+	}
+
+	private float tw(String s, float scale) {
+		return UiDraw.width(this.textRenderer, s, scale);
+	}
+
+	private void initFlakes() {
+		if (!flakes.isEmpty()) return;
+		for (int i = 0; i < 26; i++) {
+			Flake f = new Flake();
+			resetFlake(f, true);
+			flakes.add(f);
+		}
+	}
+
+	private void resetFlake(Flake f, boolean anywhere) {
+		f.x = rnd.nextFloat() * W;
+		f.y = anywhere ? rnd.nextFloat() * H : -8f;
+		f.speed = 5f + rnd.nextFloat() * 9f;
+		f.size = 2.2f + rnd.nextFloat() * 3.6f;
+		f.phase = rnd.nextFloat() * 6.28f;
+		f.rot = rnd.nextFloat() * 3.14f;
+		f.rotSpeed = (rnd.nextFloat() - 0.5f) * 0.5f;
+		f.alpha = 0.22f + rnd.nextFloat() * 0.45f;
 	}
 
 	// ---------- render ----------
@@ -327,123 +374,292 @@ public class PlayerGlowScreen extends Screen {
 
 		float p;
 		if (closing) {
-			p = 1f - (now - closeStart) / 1_000_000_000f / CLOSE_SEC;
+			p = 1f - (now - closeStart) / 1_000_000_000f / 0.35f;
 			if (p <= 0f) {
 				MinecraftClient.getInstance().setScreen(null);
 				return;
 			}
 		} else {
-			p = (now - openStart) / 1_000_000_000f / OPEN_SEC;
+			p = (now - openStart) / 1_000_000_000f / 0.5f;
 		}
 		float ease = smooth(p);
-		float pageEase = 0.3f + 0.7f * smooth((now - pageStart) / 1_000_000_000f / PAGE_SEC);
-		fade = ease * pageEase;
+		float cf = 0.25f + 0.75f * smooth((now - contentStart) / 1_000_000_000f / 0.3f);
+		fade = ease;
 
-		float oy = (1f - ease) * -22f;
-		lastOy = oy;
-		float k = Math.min(1f, dt * 6f);
-		int my = Math.round(mouseY - oy);
-		float glow = 0.75f + 0.25f * (float) Math.sin(time * 1.6);
+		this.renderBackground(ctx, mouseX, mouseY, delta);
 
-		ctx.fill(0, 0, this.width, this.height, ((int) (0x48 * ease) << 24));
+		float base = Math.max(0.45f, Math.min(1f, Math.min((this.width - 10f) / W, (this.height - 10f) / H)));
+		float sa = 0.94f + 0.06f * ease;
+		ts = base * sa;
+		tx = (this.width - W * ts) / 2f + offX;
+		ty = (this.height - H * ts) / 2f + offY + (1f - ease) * 14f;
 
-		MatrixStack stack = ctx.getMatrices();
-		stack.push();
-		stack.translate(0f, oy, 0f);
+		double lmx = (mouseX - tx) / ts, lmy = (mouseY - ty) / ts;
+		boolean live = !closing;
+		float k = Math.min(1f, dt * 8f);
+		float kSlow = Math.min(1f, dt * 6f);
 
-		// banner
-		UiDraw.fillRound(ctx, bannerX, bannerY, bannerW, BANNER_H, RAD, fa(PANEL_HEAD));
-		UiDraw.glowStroke(ctx, bannerX, bannerY, bannerW, BANNER_H, RAD, fa(alpha(ACCENT, 0.9f)), glow * fade);
-		{
-			String title = "Playboi Carti Client";
-			int tw = Math.round(this.textRenderer.getWidth(UiDraw.fnt(title)) * 1.2f);
-			MatrixStack m = ctx.getMatrices();
-			m.push();
-			m.translate((float) (bannerX + bannerW / 2 - tw / 2), (float) (bannerY + 7), 0f);
-			m.scale(1.2f, 1.2f, 1f);
-			UiDraw.text(ctx, this.textRenderer, title, 0, 0, fa(WHITE), true);
-			m.pop();
+		// ---- animation state ----
+		catOn[0] += ((cat == CAT_COMBAT && view == VIEW_LIST && query.isEmpty() ? 1f : 0f) - catOn[0]) * k;
+		catOn[1] += ((cat == CAT_RENDER && view == VIEW_LIST && query.isEmpty() ? 1f : 0f) - catOn[1]) * k;
+		boolean overExit = live && inRect(lmx, lmy, 8, H - 36, SB - 16, 26);
+		exitHover += ((overExit ? 1f : 0f) - exitHover) * k;
+		boolean overBack = live && view != VIEW_LIST && Math.hypot(lmx - (CX + 11), lmy - 25) <= 12;
+		backHover += ((overBack ? 1f : 0f) - backHover) * k;
+
+		for (Module m : modules) {
+			if (!m.visible) continue;
+			boolean gOver = live && m.gearView >= 0 && Math.hypot(lmx - gearX(m), lmy - gearY(m)) <= 9;
+			boolean over = live && m.contains(lmx, lmy) && !gOver;
+			m.hover += ((over ? 1f : 0f) - m.hover) * k;
+			m.gearHover += ((gOver ? 1f : 0f) - m.gearHover) * k;
+			m.on += ((m.get.getAsBoolean() ? 1f : 0f) - m.on) * kSlow;
+			if (m.rip >= 0f) {
+				m.rip += dt / 0.7f;
+				if (m.rip > 1f) m.rip = -1f;
+			}
 		}
-
-		boolean overClose = !closing && mouseX >= closeX && mouseX < closeX + 12 && my >= closeY && my < closeY + 12;
-		closeHover += ((overClose ? 1f : 0f) - closeHover) * k;
-		ctxt(ctx, "x", closeX + 6, closeY + 2, lerp(GRAY, ACCENT, closeHover));
-
-		// panels
-		for (Panel pn : panels) {
-			UiDraw.fillRound(ctx, pn.x(), pn.y(), pn.w(), pn.h(), RAD, fa(PANEL_BODY));
-			UiDraw.fillRoundTop(ctx, pn.x(), pn.y(), pn.w(), HEAD_H, RAD, fa(PANEL_HEAD));
-			ctx.fill(pn.x() + 4, pn.y() + HEAD_H, pn.x() + pn.w() - 4, pn.y() + HEAD_H + 1, fa(alpha(ACCENT, 0.35f)));
-			UiDraw.glowStroke(ctx, pn.x(), pn.y(), pn.w(), pn.h(), RAD, fa(alpha(ACCENT, 0.85f)), glow * fade);
-			ctxt(ctx, pn.title(), pn.x() + pn.w() / 2, pn.y() + 4, WHITE);
-		}
-
-		// back button
-		if (page != PAGE_MAIN) {
-			boolean overBack = !closing && mouseX >= backX && mouseX < backX + 16 && my >= backY && my < backY + 14;
-			backHover += ((overBack ? 1f : 0f) - backHover) * k;
-			txt(ctx, "<", backX + 3, backY + 3, lerp(GRAY, ACCENT, backHover));
-		}
-
-		// toggles
 		for (Toggle t : toggles) {
-			boolean overGear = !closing && t.gearContains(mouseX, my);
-			boolean over = !closing && t.contains(mouseX, my) && !overGear;
-			t.hover += ((over ? 1f : 0f) - t.hover) * k;
-			t.gearHover += ((overGear ? 1f : 0f) - t.gearHover) * k;
-			t.on += ((t.get.getAsBoolean() ? 1f : 0f) - t.on) * Math.min(1f, dt * 4f);
-			t.pulse = Math.max(0f, t.pulse - dt * 0.9f);
-
-			if (t.hover > 0.02f) {
-				int hc = ((int) (0x26 * t.hover) << 24) | 0xFFFFFF;
-				UiDraw.fillRound(ctx, t.x + 3, t.y, t.w - 6, t.h, 3, fa(hc));
-			}
-			if (t.on > 0.02f) {
-				ctx.fill(t.x + 3, t.y + 3, t.x + 4, t.y + t.h - 3, fa(alpha(ACCENT, t.on)));
-			}
-			int base = lerp(GRAY, ACCENT, t.on);
-			int col = lerp(base, WHITE, t.hover * (1f - t.on) * 0.5f);
-			float g = Math.min(1f, t.on + t.pulse * 0.8f);
-			gtxt(ctx, ">", t.x + 8, t.y + 4, col, g);
-			gtxt(ctx, t.label, t.x + 17, t.y + 4, col, g);
-
-			if (t.gearPage >= 0) {
-				int gx = t.x + t.w - 15;
-				int gy = t.y + (t.h - 9) / 2;
-				drawGear(ctx, gx, gy, fa(lerp(GRAY, ACCENT, t.gearHover)));
-			}
+			t.hover += (((live && t.contains(lmx, lmy)) ? 1f : 0f) - t.hover) * k;
+			t.on += ((t.get.getAsBoolean() ? 1f : 0f) - t.on) * kSlow;
+		}
+		for (Slider s : sliders) {
+			s.hover += (((live && (s.contains(lmx, lmy) || dragSlider == s)) ? 1f : 0f) - s.hover) * k;
+		}
+		for (int i = sparks.size() - 1; i >= 0; i--) {
+			Spark sp = sparks.get(i);
+			sp.age += dt;
+			sp.x += sp.vx * dt;
+			sp.y += sp.vy * dt;
+			sp.vx *= 0.97f;
+			sp.vy *= 0.97f;
+			if (sp.age >= sp.life) sparks.remove(i);
+		}
+		initFlakes();
+		for (Flake f : flakes) {
+			f.y += f.speed * dt;
+			f.x += (float) Math.sin(time * 0.7f + f.phase) * 5f * dt;
+			f.rot += f.rotSpeed * dt;
+			if (f.y > H + 8f) resetFlake(f, false);
 		}
 
-		// sliders
-		for (Slider s : sliders) {
-			float hoverTarget = (!closing && (s.contains(mouseX, my) || dragging == s)) ? 1f : 0f;
-			s.hover += (hoverTarget - s.hover) * k;
+		// ---- shapes ----
+		MatrixStack ms = ctx.getMatrices();
+		ms.push();
+		ms.translate(tx, ty, 0f);
+		ms.scale(ts, ts, 1f);
 
+		UiDraw.Gfx.begin(ctx, ts);
+		UiDraw.Gfx.shadow(0, 10, W, H, WRAD, 30, fa(0x99000000));
+		UiDraw.Gfx.rr(0, 0, W, H, WRAD, fa(WIN_BG));
+		UiDraw.Gfx.stroke(0, 0, W, H, WRAD, 1f, fa(0x26FFFFFF));
+
+		for (Flake f : flakes) {
+			float tw2 = 0.75f + 0.25f * (float) Math.sin(time * 1.6f + f.phase);
+			int col = fa(alpha(0xFFCFE6FF, f.alpha * tw2));
+			if (f.size > 4f) {
+				UiDraw.Gfx.shadow(f.x - 1, f.y - 1, 2, 2, 1, f.size * 1.6f, fa(alpha(0xFF5C9BFF, 0.10f * f.alpha * 2f)));
+			}
+			UiDraw.Gfx.snowflake(f.x, f.y, f.size, f.rot, col);
+		}
+
+		UiDraw.Gfx.rr(SB, 14, 1, H - 28, 0.5f, fa(0x14FFFFFF));
+
+		// sidebar
+		UiDraw.Gfx.rrGrad(12, 12, 28, 28, 9, fa(C1), fa(C2), 3);
+		UiDraw.Gfx.snowflake(26, 26, 7f, 0.2f, fa(WHITE));
+		for (int i = 0; i < 2; i++) {
+			float cy = 64 + i * 26;
+			if (catOn[i] > 0.01f) {
+				UiDraw.Gfx.rrGrad(8, cy, SB - 16, 22, 9, fa(alpha(C1, catOn[i])), fa(alpha(C2, catOn[i])), 1);
+			}
+			int ic = fa(lerp(MUTED, WHITE, catOn[i]));
+			if (i == 0) {
+				UiDraw.Gfx.ringCircle(22, cy + 11, 5.2f, 1.2f, ic);
+				for (int a = 0; a < 4; a++) {
+					float ca = (float) Math.cos(a * Math.PI / 2), sa2 = (float) Math.sin(a * Math.PI / 2);
+					UiDraw.Gfx.line(22 + ca * 2.5f, cy + 11 + sa2 * 2.5f, 22 + ca * 7.2f, cy + 11 + sa2 * 7.2f, 1.1f, ic);
+				}
+			} else {
+				UiDraw.Gfx.stroke(15, cy + 7, 14, 8, 4, 1.2f, ic);
+				UiDraw.Gfx.circle(22, cy + 11, 1.9f, ic);
+			}
+		}
+		if (exitHover > 0.02f) {
+			UiDraw.Gfx.rr(8, H - 36, SB - 16, 26, 9, fa(alpha(0x14FFFFFF, exitHover * 2f)));
+		}
+		{
+			int ec = fa(lerp(MUTED, WHITE, exitHover));
+			UiDraw.Gfx.ringCircle(22, H - 23, 5f, 1.2f, ec);
+			UiDraw.Gfx.line(22, H - 29, 22, H - 23, 1.4f, ec);
+		}
+
+		if (view == VIEW_LIST) {
+			drawSearchShapes(ctx, time);
+			for (Module m : modules) {
+				if (m.visible) drawModuleShapes(m, cf, time);
+			}
+		} else {
+			drawSettingsShapes(cf, lmx, lmy);
+		}
+
+		for (Spark sp : sparks) {
+			float a = 1f - sp.age / sp.life;
+			UiDraw.Gfx.snowflake(sp.x, sp.y, sp.size * (0.6f + 0.4f * a), sp.age * 2f, fa(alpha(0xFFFFFFFF, a)));
+		}
+		UiDraw.Gfx.end();
+
+		// ---- text ----
+		txt(ctx, "Playboi Carti", 46, 14, 0.85f, TEXT);
+		txt(ctx, "Client", 46, 26, 0.7f, MUTED);
+		txt(ctx, "Основные", 14, 50, 0.68f, MUTED);
+		txt(ctx, "Combat", 36, 64 + 6.5f, 0.9f, lerp(MUTED, WHITE, catOn[0]));
+		txt(ctx, "Render", 36, 90 + 6.5f, 0.9f, lerp(MUTED, WHITE, catOn[1]));
+		txt(ctx, "Выйти", 36, H - 36 + 8.5f, 0.9f, lerp(MUTED, WHITE, exitHover));
+
+		if (view == VIEW_LIST) {
+			String shown = query.isEmpty() ? "Поиск" : query;
+			int sc = query.isEmpty() ? MUTED : TEXT;
+			txt(ctx, shown, CX + 28, 12 + 8.5f, 0.9f, sc);
+			if (searchFocus && ((int) (time * 2f) % 2 == 0)) {
+				txt(ctx, "|", CX + 28 + (query.isEmpty() ? 0 : tw(query, 0.9f) + 1f), 12 + 7.5f, 0.95f, TEXT);
+			}
+			for (Module m : modules) {
+				if (m.visible) drawModuleText(ctx, m, cf);
+			}
+		} else {
+			drawSettingsText(ctx, cf);
+		}
+
+		ms.pop();
+	}
+
+	private static boolean inRect(double mx, double my, float x, float y, float w, float h) {
+		return mx >= x && mx < x + w && my >= y && my < y + h;
+	}
+
+	private float gearX(Module m) {
+		return m.x + 8 + tw(m.name, 0.95f) + 11;
+	}
+
+	private float gearY(Module m) {
+		return m.y + 13;
+	}
+
+	private void drawSearchShapes(DrawContext ctx, float time) {
+		UiDraw.Gfx.rr(CX, 12, CW, 26, 9, fa(CARD_OFF));
+		UiDraw.Gfx.stroke(CX, 12, CW, 26, 9, 1f, fa(searchFocus ? 0x55FFFFFF : BORDER));
+		UiDraw.Gfx.ringCircle(CX + 15, 24.5f, 4.2f, 1.2f, fa(MUTED));
+		UiDraw.Gfx.line(CX + 18.2f, 27.7f, CX + 21.5f, 31f, 1.3f, fa(MUTED));
+	}
+
+	private void drawModuleShapes(Module m, float cf, float time) {
+		float pop = (m.rip >= 0f) ? (float) Math.sin(m.rip * Math.PI) * 1.6f : 0f;
+		float x = m.x - pop, y = m.y - pop, w = m.w + pop * 2, h = m.h + pop * 2;
+		int oldBorder = fa(alpha(BORDER, cf));
+
+		UiDraw.Gfx.rr(x, y, w, h, 10, fa(alpha(CARD_OFF, cf)));
+		UiDraw.Gfx.stroke(x, y, w, h, 10, 1f, oldBorder);
+
+		if (m.on > 0.01f) {
+			float wipe = h + (w - h) * (1f - (float) Math.pow(1f - Math.min(1f, m.on), 3));
+			UiDraw.Gfx.shadow(x, y + 3, w, h, 10, 12, fa(alpha(0xFF7A5CF0, 0.34f * m.on * cf)));
+			UiDraw.Gfx.fill(x, y, wipe, h, 10, fa(C1), fa(C2), 1, x, y, w, h);
+		}
+		if (m.hover > 0.02f) {
+			UiDraw.Gfx.rr(x, y, w, h, 10, fa(alpha(0x14FFFFFF, m.hover)));
+		}
+		if (m.gearView >= 0) {
+			float gx = gearX(m), gy = gearY(m);
+			int gc = fa(lerp(lerp(MUTED, 0xCCFFFFFF, m.on), WHITE, m.gearHover));
+			UiDraw.Gfx.ringCircle(gx, gy, 3.1f, 1.5f, gc);
+			for (int a = 0; a < 8; a++) {
+				float ca = (float) Math.cos(a * Math.PI / 4), sa = (float) Math.sin(a * Math.PI / 4);
+				UiDraw.Gfx.line(gx + ca * 3.6f, gy + sa * 3.6f, gx + ca * 5.4f, gy + sa * 5.4f, 1.7f, gc);
+			}
+		}
+	}
+
+	private void drawModuleText(DrawContext ctx, Module m, float cf) {
+		int nameCol = lerp(TEXT, WHITE, m.on);
+		txt(ctx, m.name, m.x + 9, m.y + 8, 0.95f, alpha(nameCol, cf));
+		int dcol = lerp(MUTED, 0xDDFFFFFF, m.on);
+		String[] lines = m.desc.split("\n");
+		for (int i = 0; i < lines.length; i++) {
+			txt(ctx, lines[i], m.x + 9, m.y + 22 + i * 9f, 0.72f, alpha(dcol, cf));
+		}
+	}
+
+	private void drawSettingsShapes(float cf, double lmx, double lmy) {
+		// back button
+		UiDraw.Gfx.circle(CX + 11, 25, 11, fa(alpha(CARD_OFF, 1f + backHover)));
+		UiDraw.Gfx.ringCircle(CX + 11, 25, 11, 1f, fa(BORDER));
+		int bc = fa(lerp(MUTED, WHITE, backHover));
+		UiDraw.Gfx.line(CX + 12.5f, 20.5f, CX + 8.5f, 25f, 1.5f, bc);
+		UiDraw.Gfx.line(CX + 8.5f, 25f, CX + 12.5f, 29.5f, 1.5f, bc);
+
+		for (Toggle t : toggles) {
+			UiDraw.Gfx.rr(t.x, t.y, t.w, t.h, 9, fa(alpha(CARD_OFF, cf)));
+			UiDraw.Gfx.stroke(t.x, t.y, t.w, t.h, 9, 1f, fa(alpha(BORDER, cf)));
+			if (t.hover > 0.02f) UiDraw.Gfx.rr(t.x, t.y, t.w, t.h, 9, fa(alpha(0x10FFFFFF, t.hover)));
+			float sx = t.x + t.w - 38, sy = t.y + (t.h - 14) / 2f;
+			UiDraw.Gfx.rr(sx, sy, 28, 14, 7, fa(alpha(TRACK, cf)));
+			if (t.on > 0.01f) {
+				UiDraw.Gfx.fill(sx, sy, 28, 14, 7, fa(alpha(C1, t.on * cf)), fa(alpha(C2, t.on * cf)), 1, sx, sy, 28, 14);
+			}
+			float kx = sx + 7 + 14 * t.on;
+			UiDraw.Gfx.shadow(kx - 4.5f, sy + 3, 9, 9, 4.5f, 4, fa(alpha(0xFF000000, 0.35f * cf)));
+			UiDraw.Gfx.circle(kx, sy + 7, 5, fa(alpha(WHITE, cf)));
+		}
+		if (swatches != null) {
+			Swatches sw = swatches;
+			UiDraw.Gfx.rr(sw.x, sw.y, sw.w, sw.h, 9, fa(alpha(CARD_OFF, cf)));
+			UiDraw.Gfx.stroke(sw.x, sw.y, sw.w, sw.h, 9, 1f, fa(alpha(BORDER, cf)));
+			int cur = sw.get.getAsInt();
+			for (int i = 0; i < UiDraw.PALETTE.length; i++) {
+				float cx = sw.cellX(i), cy = sw.y + sw.h / 2f;
+				int rgb = UiDraw.PALETTE[i];
+				UiDraw.Gfx.circle(cx, cy, 7, fa(alpha(0xFF000000 | rgb, cf)));
+				if (rgb == cur) UiDraw.Gfx.ringCircle(cx, cy, 9.2f, 1.4f, fa(alpha(WHITE, cf)));
+			}
+		}
+		for (Slider s : sliders) {
+			UiDraw.Gfx.rr(s.x, s.y, s.w, s.h, 9, fa(alpha(CARD_OFF, cf)));
+			UiDraw.Gfx.stroke(s.x, s.y, s.w, s.h, 9, 1f, fa(alpha(BORDER, cf)));
+			if (s.hover > 0.02f) UiDraw.Gfx.rr(s.x, s.y, s.w, s.h, 9, fa(alpha(0x0CFFFFFF, s.hover)));
 			double v = s.get.getAsDouble();
 			float frac = (float) Math.max(0.0, Math.min(1.0, (v - s.min) / (s.max - s.min)));
-
-			txt(ctx, s.label, s.x, s.y + 2, lerp(GRAY, WHITE, s.hover));
-			String val = String.format(s.fmt, v);
-			txt(ctx, val, s.x + s.w - this.textRenderer.getWidth(UiDraw.fnt(val)), s.y + 2, ACCENT);
-
-			int ty = s.y + 15;
-			UiDraw.fillRound(ctx, s.x, ty, s.w, 3, 1, fa(TRACK));
-			int fw = Math.round(s.w * frac);
-			if (fw > 1) {
-				UiDraw.fillRound(ctx, s.x, ty - 1, fw, 5, 2, fa(alpha(ACCENT, 0.18f)));
-				UiDraw.fillRound(ctx, s.x, ty, fw, 3, 1, fa(ACCENT));
+			float tx0 = s.trackX(), tw0 = s.trackW(), ty0 = s.y + 24;
+			if (s.rainbow) {
+				UiDraw.Gfx.rainbow(tx0, ty0, tw0, 4);
+			} else {
+				UiDraw.Gfx.rr(tx0, ty0, tw0, 4, 2, fa(alpha(TRACK, cf)));
+				if (tw0 * frac > 3f) {
+					UiDraw.Gfx.fill(tx0, ty0, tw0 * frac, 4, 2, fa(C1), fa(C2), 1, tx0, ty0, tw0, 4);
+				}
 			}
-			int kx = Math.max(s.x, Math.min(s.x + s.w - 6, s.x + fw - 3));
-			UiDraw.fillRound(ctx, kx, ty - 2, 6, 7, 2, fa(WHITE));
+			float kx = tx0 + tw0 * frac;
+			UiDraw.Gfx.shadow(kx - 5, ty0 + 1, 10, 10, 5, 5, fa(alpha(0xFF000000, 0.4f * cf)));
+			UiDraw.Gfx.circle(kx, ty0 + 2, 5.6f, fa(alpha(WHITE, cf)));
 		}
+	}
 
-		stack.pop();
+	private void drawSettingsText(DrawContext ctx, float cf) {
+		txt(ctx, viewTitle, CX + 30, 19.5f, 1.1f, TEXT);
+		for (Toggle t : toggles) {
+			txt(ctx, t.label, t.x + 11, t.y + 8.5f, 0.9f, alpha(lerp(MUTED, WHITE, 0.4f + 0.6f * t.on), cf));
+		}
+		for (Slider s : sliders) {
+			txt(ctx, s.label, s.x + 12, s.y + 8, 0.9f, alpha(TEXT, cf));
+			String val = String.format(s.fmt, s.get.getAsDouble());
+			txt(ctx, val, s.x + s.w - 12 - tw(val, 0.9f), s.y + 8, 0.9f, alpha(MUTED, cf));
+		}
 	}
 
 	// ---------- input ----------
 
-	private void updateSlider(Slider s, double mouseX) {
-		double t = (mouseX - s.x) / (double) s.w;
+	private void updateSlider(Slider s, double lmx) {
+		double t = (lmx - s.trackX()) / s.trackW();
 		t = Math.max(0.0, Math.min(1.0, t));
 		double v = s.min + t * (s.max - s.min);
 		v = Math.round(v / s.step) * s.step;
@@ -451,47 +667,115 @@ public class PlayerGlowScreen extends Screen {
 		s.set.accept(v);
 	}
 
+	private void spawnSparks(float cx, float cy) {
+		for (int i = 0; i < 9; i++) {
+			Spark sp = new Spark();
+			double a = rnd.nextDouble() * Math.PI * 2;
+			float sp0 = 18f + rnd.nextFloat() * 30f;
+			sp.x = cx;
+			sp.y = cy;
+			sp.vx = (float) Math.cos(a) * sp0;
+			sp.vy = (float) Math.sin(a) * sp0;
+			sp.age = 0f;
+			sp.life = 0.6f + rnd.nextFloat() * 0.4f;
+			sp.size = 2f + rnd.nextFloat() * 2f;
+			sparks.add(sp);
+		}
+	}
+
 	@Override
 	public boolean mouseClicked(double mouseX, double mouseY, int button) {
 		if (closing) return true;
-		if (button == 0) {
-			double my = mouseY - lastOy;
+		double lmx = (mouseX - tx) / ts, lmy = (mouseY - ty) / ts;
 
-			if (mouseX >= closeX && mouseX < closeX + 12 && my >= closeY && my < closeY + 12) {
-				this.close();
+		if (lmx < 0 || lmy < 0 || lmx >= W || lmy >= H) {
+			return super.mouseClicked(mouseX, mouseY, button);
+		}
+		if (button != 0 && button != 1) return true;
+
+		if (inRect(lmx, lmy, 8, H - 36, SB - 16, 26)) {
+			this.close();
+			return true;
+		}
+		for (int i = 0; i < 2; i++) {
+			if (button == 0 && inRect(lmx, lmy, 8, 64 + i * 26, SB - 16, 22)) {
+				view = VIEW_LIST;
+				setCat(i);
 				return true;
 			}
-			if (page != PAGE_MAIN && mouseX >= backX && mouseX < backX + 16 && my >= backY && my < backY + 14) {
-				setPage(PAGE_MAIN);
+		}
+
+		if (view == VIEW_LIST) {
+			if (inRect(lmx, lmy, CX, 12, CW, 26)) {
+				searchFocus = true;
 				return true;
 			}
-			for (Toggle t : toggles) {
-				if (t.gearContains(mouseX, my)) {
-					setPage(t.gearPage);
+			searchFocus = false;
+			for (Module m : modules) {
+				if (!m.visible || !m.contains(lmx, lmy)) continue;
+				boolean onGear = m.gearView >= 0 && Math.hypot(lmx - gearX(m), lmy - gearY(m)) <= 9;
+				if ((button == 0 && onGear) || (button == 1 && m.gearView >= 0)) {
+					setView(m.gearView);
 					return true;
 				}
-				if (t.contains(mouseX, my)) {
-					t.set.accept(!t.get.getAsBoolean());
-					t.pulse = 1f;
+				if (button == 0) {
+					boolean now = !m.get.getAsBoolean();
+					m.set.accept(now);
+					if (now) {
+						m.rip = 0f;
+						spawnSparks(m.x + m.w / 2f, m.y + m.h / 2f);
+					}
 					return true;
 				}
 			}
-			for (Slider s : sliders) {
-				if (s.contains(mouseX, my)) {
-					dragging = s;
-					updateSlider(s, mouseX);
-					return true;
+		} else {
+			if (button == 0 && Math.hypot(lmx - (CX + 11), lmy - 25) <= 12) {
+				setView(VIEW_LIST);
+				return true;
+			}
+			if (button == 0) {
+				for (Toggle t : toggles) {
+					if (t.contains(lmx, lmy)) {
+						t.set.accept(!t.get.getAsBoolean());
+						return true;
+					}
+				}
+				if (swatches != null && inRect(lmx, lmy, swatches.x, swatches.y, swatches.w, swatches.h)) {
+					for (int i = 0; i < UiDraw.PALETTE.length; i++) {
+						if (Math.abs(lmx - swatches.cellX(i)) <= 9 && Math.abs(lmy - (swatches.y + swatches.h / 2f)) <= 10) {
+							swatches.set.accept(UiDraw.PALETTE[i]);
+							return true;
+						}
+					}
+				}
+				for (Slider s : sliders) {
+					if (s.contains(lmx, lmy)) {
+						dragSlider = s;
+						updateSlider(s, lmx);
+						return true;
+					}
 				}
 			}
 		}
-		return super.mouseClicked(mouseX, mouseY, button);
+
+		if (button == 0) {
+			movingWindow = true;
+		}
+		return true;
 	}
 
 	@Override
 	public boolean mouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
-		if (dragging != null && button == 0) {
-			updateSlider(dragging, mouseX);
-			return true;
+		if (button == 0) {
+			if (dragSlider != null) {
+				updateSlider(dragSlider, (mouseX - tx) / ts);
+				return true;
+			}
+			if (movingWindow) {
+				offX = Math.max(-this.width * 0.6f, Math.min(this.width * 0.6f, offX + (float) deltaX));
+				offY = Math.max(-this.height * 0.6f, Math.min(this.height * 0.6f, offY + (float) deltaY));
+				return true;
+			}
 		}
 		return super.mouseDragged(mouseX, mouseY, button, deltaX, deltaY);
 	}
@@ -499,9 +783,39 @@ public class PlayerGlowScreen extends Screen {
 	@Override
 	public boolean mouseReleased(double mouseX, double mouseY, int button) {
 		if (button == 0) {
-			dragging = null;
+			dragSlider = null;
+			movingWindow = false;
 		}
 		return super.mouseReleased(mouseX, mouseY, button);
+	}
+
+	@Override
+	public boolean charTyped(char chr, int modifiers) {
+		if (searchFocus && view == VIEW_LIST && chr >= 32 && query.length() < 18) {
+			query += chr;
+			contentStart = System.nanoTime();
+			layout();
+			return true;
+		}
+		return super.charTyped(chr, modifiers);
+	}
+
+	@Override
+	public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+		if (searchFocus && view == VIEW_LIST) {
+			if (keyCode == GLFW.GLFW_KEY_BACKSPACE) {
+				if (!query.isEmpty()) {
+					query = query.substring(0, query.length() - 1);
+					layout();
+				}
+				return true;
+			}
+			if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
+				searchFocus = false;
+				return true;
+			}
+		}
+		return super.keyPressed(keyCode, scanCode, modifiers);
 	}
 
 	@Override
