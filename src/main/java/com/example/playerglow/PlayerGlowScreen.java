@@ -4,7 +4,9 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.util.math.MatrixStack;
+import net.minecraft.text.Style;
 import net.minecraft.text.Text;
+import net.minecraft.util.Identifier;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -14,6 +16,8 @@ import java.util.function.DoubleConsumer;
 import java.util.function.DoubleSupplier;
 
 public class PlayerGlowScreen extends Screen {
+	private static final Style FONT = Style.EMPTY.withFont(Identifier.of("playerglow", "ui"));
+
 	private static final int WHITE = 0xFFFFFFFF;
 	private static final int GRAY = 0xFF8C8C8C;
 	private static final int GRAY_HOVER = 0xFFD2D2D2;
@@ -140,7 +144,7 @@ public class PlayerGlowScreen extends Screen {
 			int pw = Math.min(120, (this.width - 8 - gap) / 2);
 			int total = pw * 2 + gap;
 			int visualsH = HEAD_H + ROW_H * 2 + 4;
-			int combatH = HEAD_H + ROW_H * 3 + 4;
+			int combatH = HEAD_H + ROW_H * 4 + 4;
 			int groupH = BANNER_H + 6 + Math.max(visualsH, combatH);
 			int top = Math.max(4, (this.height - groupH) / 2);
 
@@ -168,6 +172,8 @@ public class PlayerGlowScreen extends Screen {
 					() -> PlayerGlowClient.crystalAura, v -> PlayerGlowClient.crystalAura = v);
 			addToggle(cx, pw, py, 2, "TriggerBot", false,
 					() -> PlayerGlowClient.triggerbot, v -> PlayerGlowClient.triggerbot = v);
+			addToggle(cx, pw, py, 3, "Criticals", false,
+					() -> PlayerGlowClient.criticals, v -> PlayerGlowClient.criticals = v);
 		} else {
 			int pw = Math.min(160, this.width - 8);
 			int panelH = HEAD_H + ROW_H * 3 + 6 + SLIDER_H * 3 + 6;
@@ -235,21 +241,25 @@ public class PlayerGlowScreen extends Screen {
 		return (oa << 24) | (or << 16) | (og << 8) | ob;
 	}
 
+	private static Text fnt(String s) {
+		return Text.literal(s).setStyle(FONT);
+	}
+
 	private void text(DrawContext c, String s, int x, int y, int color) {
-		c.drawTextWithShadow(this.textRenderer, Text.literal(s), x, y, color);
+		c.drawTextWithShadow(this.textRenderer, fnt(s), x, y, color);
 	}
 
 	private void centered(DrawContext c, String s, int cx, int y, int color) {
-		c.drawCenteredTextWithShadow(this.textRenderer, Text.literal(s), cx, y, color);
+		c.drawCenteredTextWithShadow(this.textRenderer, fnt(s), cx, y, color);
 	}
 
 	private void scaledCentered(DrawContext c, String s, int cx, int y, float scale, int color) {
-		int w = Math.round(this.textRenderer.getWidth(s) * scale);
+		int w = Math.round(this.textRenderer.getWidth(fnt(s)) * scale);
 		MatrixStack m = c.getMatrices();
 		m.push();
 		m.translate((float) (cx - w / 2), (float) y, 0f);
 		m.scale(scale, scale, 1f);
-		c.drawTextWithShadow(this.textRenderer, Text.literal(s), 0, 0, color);
+		c.drawTextWithShadow(this.textRenderer, fnt(s), 0, 0, color);
 		m.pop();
 	}
 
@@ -338,7 +348,7 @@ public class PlayerGlowScreen extends Screen {
 
 			text(ctx, s.label, s.x, s.y + 2, lerpColor(GRAY, WHITE, s.hover));
 			String val = String.format(s.fmt, v);
-			text(ctx, val, s.x + s.w - this.textRenderer.getWidth(val), s.y + 2, GRAY_HOVER);
+			text(ctx, val, s.x + s.w - this.textRenderer.getWidth(fnt(val)), s.y + 2, GRAY_HOVER);
 
 			int ty = s.y + 15;
 			ctx.fill(s.x, ty, s.x + s.w, ty + 3, TRACK);
