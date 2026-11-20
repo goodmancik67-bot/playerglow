@@ -140,8 +140,8 @@ public class PlayerGlowScreen extends Screen {
 			int pw = Math.min(120, (this.width - 8 - gap) / 2);
 			int total = pw * 2 + gap;
 			int visualsH = HEAD_H + ROW_H * 2 + 4;
-			int combatH = HEAD_H + ROW_H + 4;
-			int groupH = BANNER_H + 6 + visualsH;
+			int combatH = HEAD_H + ROW_H * 3 + 4;
+			int groupH = BANNER_H + 6 + Math.max(visualsH, combatH);
 			int top = Math.max(4, (this.height - groupH) / 2);
 
 			bannerX = (this.width - total) / 2;
@@ -164,6 +164,10 @@ public class PlayerGlowScreen extends Screen {
 					});
 			addToggle(cx, pw, py, 0, "Aimbot", true,
 					() -> PlayerGlowClient.aimbot, v -> PlayerGlowClient.aimbot = v);
+			addToggle(cx, pw, py, 1, "CrystalAura", false,
+					() -> PlayerGlowClient.crystalAura, v -> PlayerGlowClient.crystalAura = v);
+			addToggle(cx, pw, py, 2, "TriggerBot", false,
+					() -> PlayerGlowClient.triggerbot, v -> PlayerGlowClient.triggerbot = v);
 		} else {
 			int pw = Math.min(160, this.width - 8);
 			int panelH = HEAD_H + ROW_H * 3 + 6 + SLIDER_H * 3 + 6;
