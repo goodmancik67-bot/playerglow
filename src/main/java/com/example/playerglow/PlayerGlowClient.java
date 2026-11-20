@@ -3,6 +3,7 @@ package com.example.playerglow;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
+import com.mojang.blaze3d.systems.RenderSystem;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
@@ -13,9 +14,12 @@ import net.minecraft.client.network.ClientPlayNetworkHandler;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.block.Blocks;
 import net.minecraft.client.option.KeyBinding;
-import net.minecraft.client.render.RenderLayer;
-import net.minecraft.client.render.VertexConsumer;
-import net.minecraft.client.render.VertexConsumerProvider;
+import net.minecraft.client.gl.ShaderProgramKeys;
+import net.minecraft.client.render.BufferBuilder;
+import net.minecraft.client.render.BufferRenderer;
+import net.minecraft.client.render.Tessellator;
+import net.minecraft.client.render.VertexFormat;
+import net.minecraft.client.render.VertexFormats;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.entity.Entity;
@@ -34,6 +38,8 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
 import org.joml.Matrix4f;
+import java.util.ArrayList;
+import java.util.List;
 import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
@@ -53,9 +59,20 @@ public class PlayerGlowClient implements ClientModInitializer {
 	public static double crystalRange = 4.5;
 	public static float crystalDelayTicks = 2f;
 
+	public static boolean hitMarker = false;
+	public static boolean infoHud = false;
+
 	public static boolean espPlayers = true;
 	public static boolean espMobs = true;
-	public static boolean chinaHat = true;
+	public static boolean espBox = true;
+	public static int espColor = 0x3A9BFF;
+	public static float espAlpha = 0.85f;
+
+	public static boolean chinaHat = false;
+	public static boolean hatPlayers = true;
+	public static boolean hatMobs = true;
+	public static int hatColor = 0xF2C14E;
+	public static float hatAlpha = 0.9f;
 	public static boolean aimOnlyWhileAttacking = true;
 	public static boolean aimPlayers = true;
 	public static boolean aimMobs = true;
@@ -80,8 +97,9 @@ public class PlayerGlowClient implements ClientModInitializer {
 				"key.categories.playerglow"));
 
 		AttackEntityCallback.EVENT.register((player, world, hand, entity, hit) -> {
-			if (criticals && world.isClient && entity instanceof LivingEntity) {
-				doCrit(player);
+			if (world.isClient && entity instanceof LivingEntity living) {
+				UiDraw.noteHit(living);
+				if (criticals) doCrit(player);
 			}
 			return ActionResult.PASS;
 		});
@@ -95,8 +113,12 @@ public class PlayerGlowClient implements ClientModInitializer {
 			return ActionResult.PASS;
 		});
 
-		WorldRenderEvents.AFTER_ENTITIES.register(PlayerGlowClient::renderHats);
-		HudRenderCallback.EVENT.register((ctx, tickCounter) -> UiDraw.drawTargetHud(ctx));
+		WorldRenderEvents.AFTER_TRANSLUCENT.register(PlayerGlowClient::renderWorld);
+		HudRenderCallback.EVENT.register((ctx, tickCounter) -> {
+			UiDraw.drawInfoHud(ctx);
+			UiDraw.drawTargetHud(ctx);
+			UiDraw.drawHitMarker(ctx);
+		});
 
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
 			while (menuKey.wasPressed()) {
@@ -258,50 +280,79 @@ public class PlayerGlowClient implements ClientModInitializer {
 		crystalDelayLeft = delay;
 	}
 
-	// ---------- China hat ----------
+	// ---------- 3D ESP box + China hat ----------
 
-	private static void renderHats(WorldRenderContext ctx) {
+	private static boolean wanted(Entity e, boolean players, boolean mobs) {
 		MinecraftClient mc = MinecraftClient.getInstance();
-		if (!enabled || !chinaHat || mc.world == null || mc.player == null) return;
+		if (e == mc.player || !(e instanceof LivingEntity le) || !le.isAlive()) return false;
+		if (e instanceof ArmorStandEntity || e.isSpectator()) return false;
+		if (e.squaredDistanceTo(mc.player) > 96.0 * 96.0) return false;
+		return (e instanceof PlayerEntity) ? players : mobs;
+	}
+
+	private static void renderWorld(WorldRenderContext ctx) {
+		MinecraftClient mc = MinecraftClient.getInstance();
+		if (mc.world == null || mc.player == null) return;
+		boolean doBox = enabled && espBox;
+		boolean doHat = chinaHat;
+		if (!doBox && !doHat) return;
 		MatrixStack ms = ctx.matrixStack();
-		VertexConsumerProvider vcp = ctx.consumers();
-		if (ms == null || vcp == null) return;
+		if (ms == null) return;
 
 		Vec3d cam = ctx.camera().getPos();
 		float td = mc.getRenderTickCounter().getTickDelta(false);
 		Matrix4f m = ms.peek().getPositionMatrix();
-		VertexConsumer vc = vcp.getBuffer(RenderLayer.getDebugQuads());
-		float spin = (System.currentTimeMillis() % 6000L) / 6000f * (float) (Math.PI * 2);
 
-		for (Entity e : mc.world.getEntities()) {
-			if (e == mc.player || !(e instanceof LivingEntity le) || !le.isAlive()) continue;
-			if (e instanceof ArmorStandEntity || e.isSpectator()) continue;
-			boolean isP = e instanceof PlayerEntity;
-			if (isP ? !espPlayers : !espMobs) continue;
-			if (e.squaredDistanceTo(mc.player) > 64.0 * 64.0) continue;
+		RenderSystem.setShader(ShaderProgramKeys.POSITION_COLOR);
+		RenderSystem.enableBlend();
+		RenderSystem.defaultBlendFunc();
+		RenderSystem.disableCull();
 
-			Vec3d p = e.getLerpedPos(td);
-			float bx = (float) (p.x - cam.x);
-			float by = (float) (p.y - cam.y) + e.getHeight() + 0.05f;
-			float bz = (float) (p.z - cam.z);
-			float rad = Math.max(0.32f, e.getWidth() * 0.85f);
-			float hgt = rad * 0.7f;
-			int seg = 24;
-			for (int i = 0; i < seg; i++) {
-				float a0 = spin + (float) (i * Math.PI * 2 / seg);
-				float a1 = spin + (float) ((i + 1) * Math.PI * 2 / seg);
-				float x0 = bx + (float) Math.cos(a0) * rad, z0 = bz + (float) Math.sin(a0) * rad;
-				float x1 = bx + (float) Math.cos(a1) * rad, z1 = bz + (float) Math.sin(a1) * rad;
-				float shade = 0.55f + 0.45f * (float) Math.sin(a0 * 2.0 + 1.0) * 0.5f + 0.2f;
-				shade = Math.max(0.4f, Math.min(1f, shade));
-				int r = (int) (0x86 * shade), g = (int) (0xE3 * shade), b = (int) (0xA8 * shade);
-				// cone side (apex -> rim), drawn as a degenerate quad
-				vc.vertex(m, bx, by + hgt, bz).color(r, g, b, 170);
-				vc.vertex(m, x0, by, z0).color(r, g, b, 170);
-				vc.vertex(m, x1, by, z1).color(r, g, b, 170);
-				vc.vertex(m, x1, by, z1).color(r, g, b, 170);
+		if (doBox) {
+			List<Entity> targets = new ArrayList<>();
+			for (Entity e : mc.world.getEntities()) {
+				if (wanted(e, espPlayers, espMobs)) targets.add(e);
+			}
+			if (!targets.isEmpty()) {
+				BufferBuilder bb = Tessellator.getInstance().begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
+				for (Entity e : targets) {
+					Vec3d p = e.getLerpedPos(td);
+					Vec3d d = p.subtract(e.getPos());
+					Box b = e.getBoundingBox().offset(d.x - cam.x, d.y - cam.y, d.z - cam.z);
+					float dist = (float) Math.sqrt(e.squaredDistanceTo(mc.player));
+					float t = 0.012f + dist * 0.0016f;
+					UiDraw.espBox(bb, m, (float) b.minX, (float) b.minY, (float) b.minZ,
+							(float) b.maxX, (float) b.maxY, (float) b.maxZ, espColor, espAlpha, t);
+				}
+				RenderSystem.disableDepthTest();
+				BufferRenderer.drawWithGlobalProgram(bb.end());
+				RenderSystem.enableDepthTest();
 			}
 		}
+
+		if (doHat) {
+			List<Entity> targets = new ArrayList<>();
+			for (Entity e : mc.world.getEntities()) {
+				if (wanted(e, hatPlayers, hatMobs)) targets.add(e);
+			}
+			if (!targets.isEmpty()) {
+				BufferBuilder bb = Tessellator.getInstance().begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
+				float spin = (System.currentTimeMillis() % 9000L) / 9000f * (float) (Math.PI * 2);
+				for (Entity e : targets) {
+					Vec3d p = e.getLerpedPos(td);
+					float bx = (float) (p.x - cam.x);
+					float by = (float) (p.y - cam.y) + e.getHeight() + 0.04f;
+					float bz = (float) (p.z - cam.z);
+					float radius = Math.max(0.34f, e.getWidth() * 0.9f);
+					UiDraw.chinaHat(bb, m, bx, by, bz, radius, spin, hatColor, hatAlpha);
+				}
+				RenderSystem.enableDepthTest();
+				BufferRenderer.drawWithGlobalProgram(bb.end());
+			}
+		}
+
+		RenderSystem.enableCull();
+		RenderSystem.disableBlend();
 	}
 
 	private static void doCrit(PlayerEntity p) {
