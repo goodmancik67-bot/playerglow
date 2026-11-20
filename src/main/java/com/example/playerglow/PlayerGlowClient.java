@@ -2,8 +2,10 @@ package com.example.playerglow;
 
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.network.ClientPlayNetworkHandler;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
@@ -15,6 +17,8 @@ import net.minecraft.entity.effect.StatusEffectInstance;
 import net.minecraft.entity.effect.StatusEffects;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.Items;
+import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
+import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.math.MathHelper;
@@ -27,6 +31,7 @@ public class PlayerGlowClient implements ClientModInitializer {
 	public static boolean aimbot = false;
 	public static boolean crystalAura = false;
 	public static boolean triggerbot = false;
+	public static boolean criticals = false;
 	public static boolean aimOnlyWhileAttacking = true;
 	public static boolean aimPlayers = true;
 	public static boolean aimMobs = true;
@@ -46,6 +51,13 @@ public class PlayerGlowClient implements ClientModInitializer {
 				InputUtil.Type.KEYSYM,
 				GLFW.GLFW_KEY_M,
 				"key.categories.playerglow"));
+
+		AttackEntityCallback.EVENT.register((player, world, hand, entity, hit) -> {
+			if (criticals && world.isClient && entity instanceof LivingEntity) {
+				doCrit(player);
+			}
+			return ActionResult.PASS;
+		});
 
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
 			while (menuKey.wasPressed()) {
@@ -159,5 +171,14 @@ public class PlayerGlowClient implements ClientModInitializer {
 		client.interactionManager.attackEntity(me, best);
 		me.swingHand(Hand.MAIN_HAND);
 		crystalDelay = 2;
+	}
+
+	private static void doCrit(PlayerEntity p) {
+		if (!p.isOnGround() || p.isTouchingWater() || p.isInLava() || p.isClimbing() || p.hasVehicle()) return;
+		ClientPlayNetworkHandler h = MinecraftClient.getInstance().getNetworkHandler();
+		if (h == null) return;
+		double x = p.getX(), y = p.getY(), z = p.getZ();
+		h.sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(x, y + 0.0625, z, false, false));
+		h.sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(x, y, z, false, false));
 	}
 }
