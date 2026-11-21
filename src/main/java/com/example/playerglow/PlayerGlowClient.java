@@ -105,6 +105,17 @@ public class PlayerGlowClient implements ClientModInitializer {
 	public static int espColor = 0x3A9BFF;
 	public static float espAlpha = 0.85f;
 
+	public static boolean itemEsp = false;
+	public static int itemColor = 0xFFD84A;
+	public static float itemAlpha = 0.85f;
+	public static boolean blockOutline = false;
+
+	// block outline animation state (world coordinates)
+	private static double[] boBox = null;
+	private static float boFade = 0f;
+	private static long boLast = 0L;
+	private static BlockPos boLastPos = null;
+
 	public static boolean chinaHat = false;
 	public static boolean hatPlayers = true;
 	public static boolean hatMobs = true;
@@ -175,6 +186,10 @@ public class PlayerGlowClient implements ClientModInitializer {
 			hitMarker = gb(p, "hitMarker", hitMarker);
 			infoHud = gb(p, "infoHud", infoHud);
 			swordShimmer = gb(p, "swordShimmer", swordShimmer);
+			itemEsp = gb(p, "itemEsp", itemEsp);
+			itemColor = gi(p, "itemColor", itemColor);
+			itemAlpha = (float) gd(p, "itemAlpha", itemAlpha);
+			blockOutline = gb(p, "blockOutline", blockOutline);
 			trajectories = gb(p, "trajectories", trajectories);
 			crystalAutoPlace = gb(p, "crystalAutoPlace", crystalAutoPlace);
 			crystalAutoBreak = gb(p, "crystalAutoBreak", crystalAutoBreak);
@@ -219,6 +234,10 @@ public class PlayerGlowClient implements ClientModInitializer {
 			p.setProperty("hitMarker", String.valueOf(hitMarker));
 			p.setProperty("infoHud", String.valueOf(infoHud));
 			p.setProperty("swordShimmer", String.valueOf(swordShimmer));
+			p.setProperty("itemEsp", String.valueOf(itemEsp));
+			p.setProperty("itemColor", String.valueOf(itemColor));
+			p.setProperty("itemAlpha", String.valueOf(itemAlpha));
+			p.setProperty("blockOutline", String.valueOf(blockOutline));
 			p.setProperty("trajectories", String.valueOf(trajectories));
 			p.setProperty("crystalAutoPlace", String.valueOf(crystalAutoPlace));
 			p.setProperty("crystalAutoBreak", String.valueOf(crystalAutoBreak));
@@ -256,6 +275,8 @@ public class PlayerGlowClient implements ClientModInitializer {
 	public void onInitializeClient() {
 		loadConfig();
 		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> saveConfig());
+		// hide the vanilla black outline while our own is on
+		WorldRenderEvents.BLOCK_OUTLINE.register((wrc, boc) -> !blockOutline);
 
 		menuKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
 				"key.playerglow.menu",
@@ -459,13 +480,83 @@ public class PlayerGlowClient implements ClientModInitializer {
 		return (e instanceof PlayerEntity) ? players : mobs;
 	}
 
+	/** Translucent whitish cube with thin light edges; glides between blocks, fades and pulses. */
+	private static void drawBlockOutline(MinecraftClient mc, Vec3d cam, Matrix4f m) {
+		long now = System.nanoTime();
+		float dt = boLast == 0L ? 0.016f : Math.min(0.1f, (now - boLast) / 1_000_000_000f);
+		boLast = now;
+
+		BlockPos pos = null;
+		double[] target = null;
+		if (mc.crosshairTarget instanceof BlockHitResult bhr && bhr.getType() == HitResult.Type.BLOCK) {
+			pos = bhr.getBlockPos();
+			net.minecraft.util.shape.VoxelShape shape = mc.world.getBlockState(pos).getOutlineShape(mc.world, pos);
+			Box sb = shape.isEmpty() ? new Box(0, 0, 0, 1, 1, 1) : shape.getBoundingBox();
+			target = new double[] { pos.getX() + sb.minX, pos.getY() + sb.minY, pos.getZ() + sb.minZ,
+					pos.getX() + sb.maxX, pos.getY() + sb.maxY, pos.getZ() + sb.maxZ };
+		}
+
+		if (target != null) {
+			if (boBox == null || boFade < 0.02f) {
+				boBox = target.clone(); // appear in place
+			} else {
+				float k = 1f - (float) Math.exp(-dt * 18f); // quick smooth glide
+				for (int i = 0; i < 6; i++) boBox[i] += (target[i] - boBox[i]) * k;
+			}
+			boLastPos = pos;
+		}
+		float goal = target != null ? 1f : 0f;
+		boFade += (goal - boFade) * (1f - (float) Math.exp(-dt * 12f));
+		if (boBox == null || boFade < 0.01f) return;
+
+		float pulse = 0.5f + 0.5f * (float) Math.sin(now / 1_000_000_000.0 * 2.6);
+		float grow = 0.003f + 0.004f * pulse;
+		float x1 = (float) (boBox[0] - cam.x) - grow, y1 = (float) (boBox[1] - cam.y) - grow, z1 = (float) (boBox[2] - cam.z) - grow;
+		float x2 = (float) (boBox[3] - cam.x) + grow, y2 = (float) (boBox[4] - cam.y) + grow, z2 = (float) (boBox[5] - cam.z) + grow;
+
+		int fill = Math.round(255 * boFade * (0.20f + 0.10f * pulse));
+		int edge = Math.round(255 * boFade * (0.70f + 0.25f * pulse));
+		float cx = (x1 + x2) * 0.5f, cy = (y1 + y2) * 0.5f, cz = (z1 + z2) * 0.5f;
+		float dist = (float) Math.sqrt(cx * cx + cy * cy + cz * cz);
+		float t = 0.004f + dist * 0.0007f;
+
+		BufferBuilder bb = Tessellator.getInstance().begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
+		UiDraw.cuboid(bb, m, x1, y1, z1, x2, y2, z2, 235, 240, 255, fill);
+		for (int iy = 0; iy < 2; iy++) {
+			float y = iy == 0 ? y1 : y2;
+			for (int iz = 0; iz < 2; iz++) {
+				float z = iz == 0 ? z1 : z2;
+				UiDraw.cuboid(bb, m, x1 - t, y - t, z - t, x2 + t, y + t, z + t, 245, 248, 255, edge);
+			}
+		}
+		for (int ix = 0; ix < 2; ix++) {
+			float x = ix == 0 ? x1 : x2;
+			for (int iz = 0; iz < 2; iz++) {
+				float z = iz == 0 ? z1 : z2;
+				UiDraw.cuboid(bb, m, x - t, y1 - t, z - t, x + t, y2 + t, z + t, 245, 248, 255, edge);
+			}
+		}
+		for (int ix = 0; ix < 2; ix++) {
+			float x = ix == 0 ? x1 : x2;
+			for (int iy = 0; iy < 2; iy++) {
+				float y = iy == 0 ? y1 : y2;
+				UiDraw.cuboid(bb, m, x - t, y - t, z1 - t, x + t, y + t, z2 + t, 245, 248, 255, edge);
+			}
+		}
+		RenderSystem.disableDepthTest();
+		BufferRenderer.drawWithGlobalProgram(bb.end());
+		RenderSystem.enableDepthTest();
+	}
+
 	private static void renderWorld(WorldRenderContext ctx) {
 		MinecraftClient mc = MinecraftClient.getInstance();
 		if (mc.world == null || mc.player == null) return;
 		boolean doBox = enabled && espBox;
 		boolean doHat = chinaHat;
 		boolean doTraj = trajectories && heldThrowKind(mc.player) != 0;
-		if (!doBox && !doHat && !doTraj) return;
+		boolean doItem = itemEsp;
+		boolean doBlock = blockOutline;
+		if (!doBox && !doHat && !doTraj && !doItem && !doBlock) return;
 		MatrixStack ms = ctx.matrixStack();
 		if (ms == null) return;
 
@@ -498,6 +589,34 @@ public class PlayerGlowClient implements ClientModInitializer {
 				BufferRenderer.drawWithGlobalProgram(bb.end());
 				RenderSystem.enableDepthTest();
 			}
+		}
+
+		if (doItem) {
+			BufferBuilder bb = null;
+			for (Entity e : mc.world.getEntities()) {
+				if (!(e instanceof net.minecraft.entity.ItemEntity) || e.isRemoved()) continue;
+				if (e.squaredDistanceTo(mc.player) > 64.0 * 64.0) continue;
+				if (bb == null) bb = Tessellator.getInstance().begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
+				Vec3d p = e.getLerpedPos(td);
+				Vec3d d = p.subtract(e.getPos());
+				Box b = e.getBoundingBox().offset(d.x - cam.x, d.y - cam.y, d.z - cam.z).expand(0.04);
+				float dist = (float) Math.sqrt(e.squaredDistanceTo(mc.player));
+				float t = 0.006f + dist * 0.0012f;
+				UiDraw.espBox(bb, m, (float) b.minX, (float) b.minY, (float) b.minZ,
+						(float) b.maxX, (float) b.maxY, (float) b.maxZ, itemColor, itemAlpha, t);
+			}
+			if (bb != null) {
+				RenderSystem.disableDepthTest();
+				BufferRenderer.drawWithGlobalProgram(bb.end());
+				RenderSystem.enableDepthTest();
+			}
+		}
+
+		if (doBlock) {
+			drawBlockOutline(mc, cam, m);
+		} else {
+			boBox = null;
+			boFade = 0f;
 		}
 
 		if (doHat) {
