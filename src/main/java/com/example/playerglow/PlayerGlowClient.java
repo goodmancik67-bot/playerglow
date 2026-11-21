@@ -123,6 +123,11 @@ public class PlayerGlowClient implements ClientModInitializer {
 	public static int itemColor = 0xFFD84A;
 	public static float itemAlpha = 0.85f;
 	public static boolean blockOutline = false;
+	public static boolean tracers = false;
+	public static boolean autoTotem = false;
+	public static boolean fastPlace = false;
+	public static float fastPlaceDelay = 0f;
+	public static boolean autoSprint = false;
 
 	// block outline animation state (world coordinates)
 	private static double[] boBox = null;
@@ -204,6 +209,11 @@ public class PlayerGlowClient implements ClientModInitializer {
 			itemColor = gi(p, "itemColor", itemColor);
 			itemAlpha = (float) gd(p, "itemAlpha", itemAlpha);
 			blockOutline = gb(p, "blockOutline", blockOutline);
+			tracers = gb(p, "tracers", tracers);
+			autoTotem = gb(p, "autoTotem", autoTotem);
+			fastPlace = gb(p, "fastPlace", fastPlace);
+			fastPlaceDelay = (float) gd(p, "fastPlaceDelay", fastPlaceDelay);
+			autoSprint = gb(p, "autoSprint", autoSprint);
 			trajectories = gb(p, "trajectories", trajectories);
 			crystalAutoPlace = gb(p, "crystalAutoPlace", crystalAutoPlace);
 			crystalAutoBreak = gb(p, "crystalAutoBreak", crystalAutoBreak);
@@ -252,6 +262,11 @@ public class PlayerGlowClient implements ClientModInitializer {
 			p.setProperty("itemColor", String.valueOf(itemColor));
 			p.setProperty("itemAlpha", String.valueOf(itemAlpha));
 			p.setProperty("blockOutline", String.valueOf(blockOutline));
+			p.setProperty("tracers", String.valueOf(tracers));
+			p.setProperty("autoTotem", String.valueOf(autoTotem));
+			p.setProperty("fastPlace", String.valueOf(fastPlace));
+			p.setProperty("fastPlaceDelay", String.valueOf(fastPlaceDelay));
+			p.setProperty("autoSprint", String.valueOf(autoSprint));
 			p.setProperty("trajectories", String.valueOf(trajectories));
 			p.setProperty("crystalAutoPlace", String.valueOf(crystalAutoPlace));
 			p.setProperty("crystalAutoBreak", String.valueOf(crystalAutoBreak));
@@ -334,7 +349,67 @@ public class PlayerGlowClient implements ClientModInitializer {
 			tickTriggerbot(client);
 			tickAutoShift(client);
 			tickCrystalAura(client);
+			tickFastPlace(client);
+			tickAutoSprint(client);
+			tickAutoTotem(client);
 		});
+	}
+
+	// ---------- utilities ----------
+
+	private static int fastPlaceLeft = 0;
+	private static int totemCd = 0;
+
+	/** Fast Place: places the held block again every N ticks while use is held (vanilla: every 4). */
+	private static void tickFastPlace(MinecraftClient c) {
+		ClientPlayerEntity p = c.player;
+		if (!fastPlace || p == null || c.currentScreen != null || c.interactionManager == null) {
+			fastPlaceLeft = 0;
+			return;
+		}
+		if (!c.options.useKey.isPressed()) {
+			fastPlaceLeft = 0;
+			return;
+		}
+		if (!(p.getMainHandStack().getItem() instanceof net.minecraft.item.BlockItem)) return;
+		if (fastPlaceLeft > 0) {
+			fastPlaceLeft--;
+			return;
+		}
+		if (c.crosshairTarget instanceof BlockHitResult bhr && bhr.getType() == HitResult.Type.BLOCK) {
+			ActionResult r = c.interactionManager.interactBlock(p, Hand.MAIN_HAND, bhr);
+			if (r.isAccepted()) p.swingHand(Hand.MAIN_HAND);
+			fastPlaceLeft = Math.max(0, Math.round(fastPlaceDelay));
+		}
+	}
+
+	private static void tickAutoSprint(MinecraftClient c) {
+		ClientPlayerEntity p = c.player;
+		if (!autoSprint || p == null || c.currentScreen != null) return;
+		if (c.options.forwardKey.isPressed() && !p.isSneaking() && !p.horizontalCollision
+				&& !p.isUsingItem() && p.getHungerManager().getFoodLevel() > 6) {
+			p.setSprinting(true);
+		}
+	}
+
+	/** Auto Totem: keeps a totem of undying in the off hand. */
+	private static void tickAutoTotem(MinecraftClient c) {
+		ClientPlayerEntity p = c.player;
+		if (!autoTotem || p == null || c.interactionManager == null || c.currentScreen != null) return;
+		if (totemCd > 0) {
+			totemCd--;
+			return;
+		}
+		if (p.getOffHandStack().isOf(Items.TOTEM_OF_UNDYING)) return;
+		for (int i = 0; i < 36; i++) {
+			if (p.getInventory().getStack(i).isOf(Items.TOTEM_OF_UNDYING)) {
+				int slot = i < 9 ? 36 + i : i;
+				c.interactionManager.clickSlot(p.playerScreenHandler.syncId, slot, 40,
+						net.minecraft.screen.slot.SlotActionType.SWAP, p);
+				totemCd = 6;
+				return;
+			}
+		}
 	}
 
 	private static void tickNightVision(MinecraftClient client) {
@@ -570,7 +645,8 @@ public class PlayerGlowClient implements ClientModInitializer {
 		boolean doTraj = trajectories && heldThrowKind(mc.player) != 0;
 		boolean doItem = itemEsp;
 		boolean doBlock = blockOutline;
-		if (!doBox && !doHat && !doTraj && !doItem && !doBlock) return;
+		boolean doTracers = tracers;
+		if (!doBox && !doHat && !doTraj && !doItem && !doBlock && !doTracers) return;
 		MatrixStack ms = ctx.matrixStack();
 		if (ms == null) return;
 
@@ -618,6 +694,27 @@ public class PlayerGlowClient implements ClientModInitializer {
 				float t = 0.006f + dist * 0.0012f;
 				UiDraw.espBox(bb, m, (float) b.minX, (float) b.minY, (float) b.minZ,
 						(float) b.maxX, (float) b.maxY, (float) b.maxZ, itemColor, itemAlpha, t);
+			}
+			if (bb != null) {
+				RenderSystem.disableDepthTest();
+				BufferRenderer.drawWithGlobalProgram(bb.end());
+				RenderSystem.enableDepthTest();
+			}
+		}
+
+		if (doTracers) {
+			BufferBuilder bb = null;
+			Vec3d look = Vec3d.fromPolar(ctx.camera().getPitch(), ctx.camera().getYaw());
+			Vec3d start = look.multiply(0.6);
+			for (Entity e : mc.world.getEntities()) {
+				if (!(e instanceof PlayerEntity) || e == mc.player || !((PlayerEntity) e).isAlive() || e.isSpectator()) continue;
+				float dist = (float) Math.sqrt(e.squaredDistanceTo(mc.player));
+				if (dist > 128f) continue;
+				if (bb == null) bb = Tessellator.getInstance().begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
+				Vec3d end = e.getLerpedPos(td).subtract(cam).add(0, e.getHeight() * 0.5, 0);
+				int rgb = dist < 16f ? 0xFF5C7A : dist < 40f ? 0xF2C14E : 0x6FE3A0;
+				float w = (float) Math.max(0.004, Math.min(0.04, end.length() * 0.0024));
+				ribbon(bb, m, start, end, w, rgb, 210);
 			}
 			if (bb != null) {
 				RenderSystem.disableDepthTest();
