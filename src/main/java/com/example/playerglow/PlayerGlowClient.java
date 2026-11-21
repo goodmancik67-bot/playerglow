@@ -40,7 +40,10 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
 import org.joml.Matrix4f;
+import net.minecraft.util.hit.HitResult;
+import net.minecraft.world.RaycastContext;
 import java.util.ArrayList;
+import java.util.Optional;
 import java.util.List;
 import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.math.MathHelper;
@@ -63,6 +66,8 @@ public class PlayerGlowClient implements ClientModInitializer {
 
 	public static boolean hitMarker = false;
 	public static boolean swordShimmer = false;
+	public static boolean trajectories = false;
+	public static boolean autoShift = false;
 
 	// set by the item-render mixins while a sword is being drawn
 	public static boolean shimmerActive = false;
@@ -107,6 +112,8 @@ public class PlayerGlowClient implements ClientModInitializer {
 
 	private static KeyBinding menuKey;
 	private static boolean nightVisionApplied = false;
+	private static int shiftTicks = 0;
+	private static boolean shiftForced = false;
 	private static int crystalDelayLeft = 0;
 	private static int recentCrystal = 0;
 	private static int pendingTicks = 0;
@@ -123,6 +130,7 @@ public class PlayerGlowClient implements ClientModInitializer {
 		AttackEntityCallback.EVENT.register((player, world, hand, entity, hit) -> {
 			if (world.isClient && entity instanceof LivingEntity living) {
 				UiDraw.noteHit(living);
+				if (autoShift) shiftTicks = 4;
 				if (criticals) doCrit(player);
 			}
 			return ActionResult.PASS;
@@ -153,6 +161,7 @@ public class PlayerGlowClient implements ClientModInitializer {
 			tickNightVision(client);
 			tickAimbot(client);
 			tickTriggerbot(client);
+			tickAutoShift(client);
 			tickCrystalAura(client);
 		});
 	}
@@ -319,7 +328,8 @@ public class PlayerGlowClient implements ClientModInitializer {
 		if (mc.world == null || mc.player == null) return;
 		boolean doBox = enabled && espBox;
 		boolean doHat = chinaHat;
-		if (!doBox && !doHat) return;
+		boolean doTraj = trajectories && heldThrowKind(mc.player) != 0;
+		if (!doBox && !doHat && !doTraj) return;
 		MatrixStack ms = ctx.matrixStack();
 		if (ms == null) return;
 
@@ -375,8 +385,131 @@ public class PlayerGlowClient implements ClientModInitializer {
 			}
 		}
 
+		if (doTraj) {
+			List<Vec3d> pts = new ArrayList<>();
+			int kind = simulateThrow(mc, td, pts);
+			if (kind != 0 && pts.size() > 1) {
+				int rgb = kind == 1 ? 0xA78BFA : 0xF2668B;
+				BufferBuilder bb = Tessellator.getInstance().begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
+				int n = pts.size();
+				for (int i = 0; i < n - 1; i++) {
+					Vec3d a = pts.get(i).subtract(cam);
+					Vec3d b = pts.get(i + 1).subtract(cam);
+					int alpha = Math.round(230f * (1f - 0.55f * i / n));
+					ribbon(bb, m, a, b, 0.045f, rgb, alpha);
+				}
+				Vec3d end = pts.get(n - 1).subtract(cam);
+				float ex = (float) end.x, ey = (float) end.y, ez = (float) end.z;
+				int r = (rgb >> 16) & 255, g = (rgb >> 8) & 255, bl = rgb & 255;
+				UiDraw.cuboid(bb, m, ex - 0.07f, ey - 0.07f, ez - 0.07f, ex + 0.07f, ey + 0.07f, ez + 0.07f, r, g, bl, 255);
+				UiDraw.cuboid(bb, m, ex - 0.2f, ey - 0.2f, ez - 0.2f, ex + 0.2f, ey + 0.2f, ez + 0.2f, r, g, bl, 70);
+				RenderSystem.enableDepthTest();
+				BufferRenderer.drawWithGlobalProgram(bb.end());
+			}
+		}
+
 		RenderSystem.enableCull();
 		RenderSystem.disableBlend();
+	}
+
+	private static void tickAutoShift(MinecraftClient client) {
+		if (client.player == null || client.currentScreen != null) {
+			shiftTicks = 0;
+			shiftForced = false;
+			return;
+		}
+		if (autoShift && shiftTicks > 0) {
+			shiftTicks--;
+			client.options.sneakKey.setPressed(true);
+			shiftForced = true;
+		} else if (shiftForced) {
+			shiftForced = false;
+			int code = KeyBindingHelper.getBoundKeyOf(client.options.sneakKey).getCode();
+			client.options.sneakKey.setPressed(InputUtil.isKeyPressed(client.getWindow().getHandle(), code));
+		}
+	}
+
+	// ---------- throw trajectory (ender pearl / potions) ----------
+
+	private static int throwKind(ItemStack s) {
+		if (s == null || s.isEmpty()) return 0;
+		if (s.isOf(Items.ENDER_PEARL)) return 1;
+		if (s.isOf(Items.SPLASH_POTION) || s.isOf(Items.LINGERING_POTION)) return 2;
+		return 0;
+	}
+
+	private static int heldThrowKind(ClientPlayerEntity p) {
+		int k = throwKind(p.getMainHandStack());
+		return k != 0 ? k : throwKind(p.getOffHandStack());
+	}
+
+	/** Fills out with world-space points of the flight path. Returns the item kind (0 = nothing to draw). */
+	private static int simulateThrow(MinecraftClient mc, float td, List<Vec3d> out) {
+		ClientPlayerEntity p = mc.player;
+		int kind = heldThrowKind(p);
+		if (kind == 0) return 0;
+
+		float speed = kind == 1 ? 1.5f : 0.5f;
+		float roll = kind == 1 ? 0f : -20f;
+		double gravity = kind == 1 ? 0.03 : 0.05;
+		float pitch = p.getPitch(td), yaw = p.getYaw(td);
+		double rad = Math.PI / 180.0;
+		double fx = -Math.sin(yaw * rad) * Math.cos(pitch * rad);
+		double fy = -Math.sin((pitch + roll) * rad);
+		double fz = Math.cos(yaw * rad) * Math.cos(pitch * rad);
+		Vec3d vel = new Vec3d(fx, fy, fz).normalize().multiply(speed);
+		Vec3d pv = p.getVelocity();
+		vel = vel.add(pv.x, p.isOnGround() ? 0.0 : pv.y, pv.z);
+		Vec3d pos = p.getLerpedPos(td).add(0.0, p.getEyeY() - p.getY() - 0.1, 0.0);
+
+		out.add(pos);
+		for (int i = 0; i < 200; i++) {
+			Vec3d next = pos.add(vel);
+			boolean stop = false;
+			double best = Double.MAX_VALUE;
+
+			BlockHitResult bh = mc.world.raycast(new RaycastContext(pos, next,
+					RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, p));
+			if (bh.getType() != HitResult.Type.MISS) {
+				next = bh.getPos();
+				best = pos.squaredDistanceTo(next);
+				stop = true;
+			}
+			for (Entity e : mc.world.getEntities()) {
+				if (e == p || !(e instanceof LivingEntity) || e.isSpectator()) continue;
+				Optional<Vec3d> r = e.getBoundingBox().expand(0.3).raycast(pos, next);
+				if (r.isPresent()) {
+					double d = pos.squaredDistanceTo(r.get());
+					if (d < best) {
+						best = d;
+						next = r.get();
+						stop = true;
+					}
+				}
+			}
+			out.add(next);
+			if (stop) break;
+			pos = next;
+			vel = vel.multiply(0.99).subtract(0.0, gravity, 0.0);
+			if (pos.y < mc.world.getBottomY() - 16) break;
+		}
+		return kind;
+	}
+
+	private static void ribbon(BufferBuilder bb, Matrix4f m, Vec3d a, Vec3d b, float width, int rgb, int alpha) {
+		Vec3d dir = b.subtract(a);
+		Vec3d mid = a.add(b).multiply(0.5);
+		Vec3d side = dir.crossProduct(mid);
+		double len = side.length();
+		if (len < 1.0e-6) return;
+		side = side.multiply(width * 0.5 / len);
+		int r = (rgb >> 16) & 255, g = (rgb >> 8) & 255, bl = rgb & 255;
+		UiDraw.quad(bb, m,
+				(float) (a.x - side.x), (float) (a.y - side.y), (float) (a.z - side.z),
+				(float) (a.x + side.x), (float) (a.y + side.y), (float) (a.z + side.z),
+				(float) (b.x + side.x), (float) (b.y + side.y), (float) (b.z + side.z),
+				(float) (b.x - side.x), (float) (b.y - side.y), (float) (b.z - side.z),
+				r, g, bl, alpha);
 	}
 
 	private static void doCrit(PlayerEntity p) {
