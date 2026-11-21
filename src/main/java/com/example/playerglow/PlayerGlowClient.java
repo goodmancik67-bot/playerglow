@@ -91,63 +91,17 @@ public class PlayerGlowClient implements ClientModInitializer {
 		return Registries.ITEM.getId(stack.getItem()).getPath().endsWith("_sword");
 	}
 
-	private static net.minecraft.client.texture.Sprite swordSprite = null;
-	private static final java.util.IdentityHashMap<net.minecraft.client.render.model.BakedQuad, net.minecraft.client.render.model.BakedQuad> swordCache = new java.util.IdentityHashMap<>();
-	private static final net.minecraft.client.util.SpriteIdentifier SWORD_ITEMS = new net.minecraft.client.util.SpriteIdentifier(
-			net.minecraft.util.Identifier.of("minecraft", "textures/atlas/items.png"),
-			net.minecraft.util.Identifier.of("playerglow", "item/purple_sword"));
-	private static final net.minecraft.client.util.SpriteIdentifier SWORD_BLOCKS = new net.minecraft.client.util.SpriteIdentifier(
-			net.minecraft.util.Identifier.of("minecraft", "textures/atlas/blocks.png"),
-			net.minecraft.util.Identifier.of("playerglow", "item/purple_sword"));
+	private static final net.minecraft.util.Identifier GLOW_MODEL = net.minecraft.util.Identifier.of("playerglow", "glow_sword");
 
-	private static boolean isOurs(net.minecraft.client.texture.Sprite s) {
+	/** Glow Hand: draws swords with our own purple animated item model instead of the vanilla one. */
+	public static ItemStack glowStack(ItemStack stack) {
 		try {
-			return s != null && s.getContents().getId().getNamespace().equals("playerglow");
+			if (!swordShimmer || !isSword(stack)) return stack;
+			ItemStack c = stack.copy();
+			c.set(net.minecraft.component.DataComponentTypes.ITEM_MODEL, GLOW_MODEL);
+			return c;
 		} catch (Throwable t) {
-			return false;
-		}
-	}
-
-	private static net.minecraft.client.texture.Sprite findSwordSprite() {
-		net.minecraft.client.texture.Sprite s = SWORD_ITEMS.getSprite();
-		if (isOurs(s)) return s;
-		s = SWORD_BLOCKS.getSprite();
-		return isOurs(s) ? s : null;
-	}
-
-	/** Re-maps a sword quad's UVs from its vanilla sprite onto the animated purple sword sprite. */
-	public static net.minecraft.client.render.model.BakedQuad swordQuad(net.minecraft.client.render.model.BakedQuad q) {
-		try {
-			net.minecraft.client.texture.Sprite target = findSwordSprite();
-			if (target == null) return q; // texture missing -> keep the normal sword
-			if (target != swordSprite) {
-				swordCache.clear();
-				swordSprite = target;
-			}
-			net.minecraft.client.render.model.BakedQuad c = swordCache.get(q);
-			if (c != null) return c;
-			net.minecraft.client.texture.Sprite old = q.getSprite();
-			if (old == target) return q;
-			float ou = old.getMinU(), ov = old.getMinV();
-			float du = old.getMaxU() - ou, dv = old.getMaxV() - ov;
-			if (du == 0f || dv == 0f) return q;
-			int[] v = q.getVertexData().clone();
-			float tu = target.getMinU(), tv = target.getMinV();
-			float tdu = target.getMaxU() - tu, tdv = target.getMaxV() - tv;
-			for (int i = 0; i < 4; i++) {
-				int o = i * 8 + 4;
-				float u = Float.intBitsToFloat(v[o]);
-				float w = Float.intBitsToFloat(v[o + 1]);
-				v[o] = Float.floatToRawIntBits(tu + (u - ou) / du * tdu);
-				v[o + 1] = Float.floatToRawIntBits(tv + (w - ov) / dv * tdv);
-			}
-			net.minecraft.client.render.model.BakedQuad n = new net.minecraft.client.render.model.BakedQuad(
-					v, q.getTintIndex(), q.getFace(), target, q.hasShade(), q.getLightEmission());
-			if (swordCache.size() > 4096) swordCache.clear();
-			swordCache.put(q, n);
-			return n;
-		} catch (Throwable t) {
-			return q;
+			return stack;
 		}
 	}
 
