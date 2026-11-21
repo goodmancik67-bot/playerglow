@@ -38,9 +38,9 @@ public class PlayerGlowScreen extends Screen {
 	private static final int VIEW_LIST = -1, VIEW_AIMBOT = 0, VIEW_CRYSTAL = 1, VIEW_ESP = 2, VIEW_HAT = 3;
 
 	// window position offset (kept while the game is running)
-	private static float offX = 0f, offY = 0f;
+	static float offX = 0f, offY = 0f;
 	// menu settings (kept while the game is running)
-	private static float menuScale = 1.0f, pendingScale = 1.0f, menuOpacity = 0.88f;
+	static float menuScale = 1.0f, pendingScale = 1.0f, menuOpacity = 0.88f;
 
 	private static final class Module {
 		final String name, desc;
@@ -199,7 +199,7 @@ public class PlayerGlowScreen extends Screen {
 				() -> PlayerGlowClient.infoHud, v -> PlayerGlowClient.infoHud = v));
 		modules.add(new Module("Sword Shimmer", "Мечи переливаются от\nчёрного к серому", CAT_RENDER, -1,
 				() -> PlayerGlowClient.swordShimmer, v -> PlayerGlowClient.swordShimmer = v));
-		modules.add(new Module("Trajectories", "Линия полёта перла\nи зелий до цели", CAT_RENDER, -1,
+		modules.add(new Module("Trajectories", "Линия полёта перла,\nзелий, лука и трезубца", CAT_RENDER, -1,
 				() -> PlayerGlowClient.trajectories, v -> PlayerGlowClient.trajectories = v));
 	}
 
@@ -826,6 +826,7 @@ public class PlayerGlowScreen extends Screen {
 			dragSlider = null;
 			movingWindow = false;
 			menuScale = pendingScale;
+			PlayerGlowClient.saveConfig();
 		}
 		return super.mouseReleased(mouseX, mouseY, button);
 	}
@@ -857,6 +858,12 @@ public class PlayerGlowScreen extends Screen {
 			}
 		}
 		return super.keyPressed(keyCode, scanCode, modifiers);
+	}
+
+	@Override
+	public void removed() {
+		PlayerGlowClient.saveConfig();
+		super.removed();
 	}
 
 	@Override
