@@ -29,7 +29,9 @@ import net.minecraft.entity.decoration.EndCrystalEntity;
 import net.minecraft.entity.effect.StatusEffectInstance;
 import net.minecraft.entity.effect.StatusEffects;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
+import net.minecraft.registry.Registries;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
@@ -60,6 +62,28 @@ public class PlayerGlowClient implements ClientModInitializer {
 	public static float crystalDelayTicks = 2f;
 
 	public static boolean hitMarker = false;
+	public static boolean swordShimmer = false;
+
+	// set by the item-render mixins while a sword is being drawn
+	public static boolean shimmerActive = false;
+	public static int shimmerIdx = 0;
+
+	/** Implemented by ItemRenderState (via mixin) to remember whether the stack is a sword. */
+	public interface SwordFlag {
+		void playerglow$setSword(boolean sword);
+	}
+
+	public static boolean isSword(ItemStack stack) {
+		if (stack == null || stack.isEmpty()) return false;
+		return Registries.ITEM.getId(stack.getItem()).getPath().endsWith("_sword");
+	}
+
+	/** Slow black-to-gray wave, phase-shifted per quad so it ripples across the blade. */
+	public static float shimmerValue(int idx) {
+		double t = (System.nanoTime() / 1_000_000_000.0) * 0.8;
+		double w = 0.5 + 0.5 * Math.sin(t + idx * 0.55);
+		return (float) (0.10 + 0.55 * w);
+	}
 	public static boolean infoHud = false;
 
 	public static boolean espPlayers = true;
