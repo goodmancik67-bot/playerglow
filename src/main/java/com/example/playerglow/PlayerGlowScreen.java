@@ -202,7 +202,7 @@ public class PlayerGlowScreen extends Screen {
 				() -> PlayerGlowClient.hitMarker, v -> PlayerGlowClient.hitMarker = v));
 		modules.add(new Module("Info HUD", "FPS, координаты\nи направление взгляда", CAT_RENDER, -1,
 				() -> PlayerGlowClient.infoHud, v -> PlayerGlowClient.infoHud = v));
-		modules.add(new Module("Glow Hand", "Меч в руке светится\nфиолетовой заливкой", CAT_RENDER, -1,
+		modules.add(new Module("Glow Hand", "Мечи и инструменты в руке\nсветятся фиолетовой заливкой", CAT_RENDER, -1,
 				() -> PlayerGlowClient.swordShimmer, v -> PlayerGlowClient.swordShimmer = v));
 		modules.add(new Module("Item ESP", "3D-бокс вокруг предметов\nна земле", CAT_RENDER, VIEW_ITEM,
 				() -> PlayerGlowClient.itemEsp, v -> PlayerGlowClient.itemEsp = v));
