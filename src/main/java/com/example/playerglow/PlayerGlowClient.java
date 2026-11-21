@@ -91,6 +91,47 @@ public class PlayerGlowClient implements ClientModInitializer {
 		return Registries.ITEM.getId(stack.getItem()).getPath().endsWith("_sword");
 	}
 
+	private static net.minecraft.client.texture.Sprite swordSprite = null;
+	private static final java.util.IdentityHashMap<net.minecraft.client.render.model.BakedQuad, net.minecraft.client.render.model.BakedQuad> swordCache = new java.util.IdentityHashMap<>();
+	private static final net.minecraft.client.util.SpriteIdentifier SWORD_ID = new net.minecraft.client.util.SpriteIdentifier(
+			net.minecraft.util.Identifier.of("minecraft", "textures/atlas/blocks.png"),
+			net.minecraft.util.Identifier.of("playerglow", "item/purple_sword"));
+
+	/** Re-maps a sword quad's UVs from its vanilla sprite onto the animated purple sword sprite. */
+	public static net.minecraft.client.render.model.BakedQuad swordQuad(net.minecraft.client.render.model.BakedQuad q) {
+		try {
+			net.minecraft.client.texture.Sprite target = SWORD_ID.getSprite();
+			if (target != swordSprite) {
+				swordCache.clear();
+				swordSprite = target;
+			}
+			net.minecraft.client.render.model.BakedQuad c = swordCache.get(q);
+			if (c != null) return c;
+			net.minecraft.client.texture.Sprite old = q.getSprite();
+			if (old == target) return q;
+			float ou = old.getMinU(), ov = old.getMinV();
+			float du = old.getMaxU() - ou, dv = old.getMaxV() - ov;
+			if (du == 0f || dv == 0f) return q;
+			int[] v = q.getVertexData().clone();
+			float tu = target.getMinU(), tv = target.getMinV();
+			float tdu = target.getMaxU() - tu, tdv = target.getMaxV() - tv;
+			for (int i = 0; i < 4; i++) {
+				int o = i * 8 + 4;
+				float u = Float.intBitsToFloat(v[o]);
+				float w = Float.intBitsToFloat(v[o + 1]);
+				v[o] = Float.floatToRawIntBits(tu + (u - ou) / du * tdu);
+				v[o + 1] = Float.floatToRawIntBits(tv + (w - ov) / dv * tdv);
+			}
+			net.minecraft.client.render.model.BakedQuad n = new net.minecraft.client.render.model.BakedQuad(
+					v, q.getTintIndex(), q.getFace(), target, q.hasShade(), q.getLightEmission());
+			if (swordCache.size() > 4096) swordCache.clear();
+			swordCache.put(q, n);
+			return n;
+		} catch (Throwable t) {
+			return q;
+		}
+	}
+
 	/** Slow black-to-gray wave, phase-shifted per quad so it ripples across the blade. */
 	public static float shimmerValue(int idx) {
 		double t = (System.nanoTime() / 1_000_000_000.0) * 0.8;
