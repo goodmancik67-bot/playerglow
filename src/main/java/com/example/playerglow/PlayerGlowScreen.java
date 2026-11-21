@@ -195,6 +195,8 @@ public class PlayerGlowScreen extends Screen {
 				() -> PlayerGlowClient.hitMarker, v -> PlayerGlowClient.hitMarker = v));
 		modules.add(new Module("Info HUD", "FPS, координаты\nи направление взгляда", CAT_RENDER, -1,
 				() -> PlayerGlowClient.infoHud, v -> PlayerGlowClient.infoHud = v));
+		modules.add(new Module("Sword Shimmer", "Мечи переливаются от\nчёрного к серому", CAT_RENDER, -1,
+				() -> PlayerGlowClient.swordShimmer, v -> PlayerGlowClient.swordShimmer = v));
 	}
 
 	// ---------- layout ----------
