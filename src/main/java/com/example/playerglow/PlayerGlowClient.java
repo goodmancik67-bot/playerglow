@@ -42,6 +42,14 @@ import net.minecraft.util.math.Direction;
 import org.joml.Matrix4f;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.world.RaycastContext;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
+import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.item.BowItem;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Properties;
 import java.util.ArrayList;
 import java.util.Optional;
 import java.util.List;
@@ -119,8 +127,136 @@ public class PlayerGlowClient implements ClientModInitializer {
 	private static int pendingTicks = 0;
 	private static BlockPos pendingObsidian = null;
 
+	// ---------- config (saved to .minecraft/config/playboi_carti_client.properties) ----------
+
+	private static Path cfgPath() {
+		return FabricLoader.getInstance().getConfigDir().resolve("playboi_carti_client.properties");
+	}
+
+	private static boolean gb(Properties p, String k, boolean d) {
+		String v = p.getProperty(k);
+		return v == null ? d : Boolean.parseBoolean(v);
+	}
+
+	private static double gd(Properties p, String k, double d) {
+		try {
+			String v = p.getProperty(k);
+			return v == null ? d : Double.parseDouble(v);
+		} catch (Exception e) {
+			return d;
+		}
+	}
+
+	private static int gi(Properties p, String k, int d) {
+		try {
+			String v = p.getProperty(k);
+			return v == null ? d : Integer.parseInt(v);
+		} catch (Exception e) {
+			return d;
+		}
+	}
+
+	public static void loadConfig() {
+		try {
+			Path f = cfgPath();
+			if (!Files.exists(f)) return;
+			Properties p = new Properties();
+			try (InputStream in = Files.newInputStream(f)) {
+				p.load(in);
+			}
+			enabled = gb(p, "enabled", enabled);
+			xray = gb(p, "xray", xray);
+			aimbot = gb(p, "aimbot", aimbot);
+			crystalAura = gb(p, "crystalAura", crystalAura);
+			triggerbot = gb(p, "triggerbot", triggerbot);
+			criticals = gb(p, "criticals", criticals);
+			autoShift = gb(p, "autoShift", autoShift);
+			targetHud = gb(p, "targetHud", targetHud);
+			hitMarker = gb(p, "hitMarker", hitMarker);
+			infoHud = gb(p, "infoHud", infoHud);
+			swordShimmer = gb(p, "swordShimmer", swordShimmer);
+			trajectories = gb(p, "trajectories", trajectories);
+			crystalAutoPlace = gb(p, "crystalAutoPlace", crystalAutoPlace);
+			crystalAutoBreak = gb(p, "crystalAutoBreak", crystalAutoBreak);
+			crystalRange = gd(p, "crystalRange", crystalRange);
+			crystalDelayTicks = (float) gd(p, "crystalDelayTicks", crystalDelayTicks);
+			espPlayers = gb(p, "espPlayers", espPlayers);
+			espMobs = gb(p, "espMobs", espMobs);
+			espBox = gb(p, "espBox", espBox);
+			espColor = gi(p, "espColor", espColor);
+			espAlpha = (float) gd(p, "espAlpha", espAlpha);
+			chinaHat = gb(p, "chinaHat", chinaHat);
+			hatPlayers = gb(p, "hatPlayers", hatPlayers);
+			hatMobs = gb(p, "hatMobs", hatMobs);
+			hatColor = gi(p, "hatColor", hatColor);
+			hatAlpha = (float) gd(p, "hatAlpha", hatAlpha);
+			aimOnlyWhileAttacking = gb(p, "aimOnlyWhileAttacking", aimOnlyWhileAttacking);
+			aimPlayers = gb(p, "aimPlayers", aimPlayers);
+			aimMobs = gb(p, "aimMobs", aimMobs);
+			aimRange = gd(p, "aimRange", aimRange);
+			aimFov = (float) gd(p, "aimFov", aimFov);
+			aimSmooth = (float) gd(p, "aimSmooth", aimSmooth);
+			PlayerGlowScreen.menuScale = (float) gd(p, "menuScale", PlayerGlowScreen.menuScale);
+			PlayerGlowScreen.pendingScale = PlayerGlowScreen.menuScale;
+			PlayerGlowScreen.menuOpacity = (float) gd(p, "menuOpacity", PlayerGlowScreen.menuOpacity);
+			PlayerGlowScreen.offX = (float) gd(p, "menuX", PlayerGlowScreen.offX);
+			PlayerGlowScreen.offY = (float) gd(p, "menuY", PlayerGlowScreen.offY);
+		} catch (Exception ignored) {
+		}
+	}
+
+	public static void saveConfig() {
+		try {
+			Properties p = new Properties();
+			p.setProperty("enabled", String.valueOf(enabled));
+			p.setProperty("xray", String.valueOf(xray));
+			p.setProperty("aimbot", String.valueOf(aimbot));
+			p.setProperty("crystalAura", String.valueOf(crystalAura));
+			p.setProperty("triggerbot", String.valueOf(triggerbot));
+			p.setProperty("criticals", String.valueOf(criticals));
+			p.setProperty("autoShift", String.valueOf(autoShift));
+			p.setProperty("targetHud", String.valueOf(targetHud));
+			p.setProperty("hitMarker", String.valueOf(hitMarker));
+			p.setProperty("infoHud", String.valueOf(infoHud));
+			p.setProperty("swordShimmer", String.valueOf(swordShimmer));
+			p.setProperty("trajectories", String.valueOf(trajectories));
+			p.setProperty("crystalAutoPlace", String.valueOf(crystalAutoPlace));
+			p.setProperty("crystalAutoBreak", String.valueOf(crystalAutoBreak));
+			p.setProperty("crystalRange", String.valueOf(crystalRange));
+			p.setProperty("crystalDelayTicks", String.valueOf(crystalDelayTicks));
+			p.setProperty("espPlayers", String.valueOf(espPlayers));
+			p.setProperty("espMobs", String.valueOf(espMobs));
+			p.setProperty("espBox", String.valueOf(espBox));
+			p.setProperty("espColor", String.valueOf(espColor));
+			p.setProperty("espAlpha", String.valueOf(espAlpha));
+			p.setProperty("chinaHat", String.valueOf(chinaHat));
+			p.setProperty("hatPlayers", String.valueOf(hatPlayers));
+			p.setProperty("hatMobs", String.valueOf(hatMobs));
+			p.setProperty("hatColor", String.valueOf(hatColor));
+			p.setProperty("hatAlpha", String.valueOf(hatAlpha));
+			p.setProperty("aimOnlyWhileAttacking", String.valueOf(aimOnlyWhileAttacking));
+			p.setProperty("aimPlayers", String.valueOf(aimPlayers));
+			p.setProperty("aimMobs", String.valueOf(aimMobs));
+			p.setProperty("aimRange", String.valueOf(aimRange));
+			p.setProperty("aimFov", String.valueOf(aimFov));
+			p.setProperty("aimSmooth", String.valueOf(aimSmooth));
+			p.setProperty("menuScale", String.valueOf(PlayerGlowScreen.menuScale));
+			p.setProperty("menuOpacity", String.valueOf(PlayerGlowScreen.menuOpacity));
+			p.setProperty("menuX", String.valueOf(PlayerGlowScreen.offX));
+			p.setProperty("menuY", String.valueOf(PlayerGlowScreen.offY));
+			Path f = cfgPath();
+			try (OutputStream out = Files.newOutputStream(f)) {
+				p.store(out, "Playboi Carti Client settings");
+			}
+		} catch (Exception ignored) {
+		}
+	}
+
 	@Override
 	public void onInitializeClient() {
+		loadConfig();
+		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> saveConfig());
+
 		menuKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
 				"key.playerglow.menu",
 				InputUtil.Type.KEYSYM,
@@ -389,20 +525,21 @@ public class PlayerGlowClient implements ClientModInitializer {
 			List<Vec3d> pts = new ArrayList<>();
 			int kind = simulateThrow(mc, td, pts);
 			if (kind != 0 && pts.size() > 1) {
-				int rgb = kind == 1 ? 0xA78BFA : 0xF2668B;
+				int rgb = kind == 1 ? 0xC4B5FD : kind == 2 ? 0xF9A8D4 : kind == 3 ? 0x93C5FD : 0x67E8F9;
 				BufferBuilder bb = Tessellator.getInstance().begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
 				int n = pts.size();
 				for (int i = 0; i < n - 1; i++) {
 					Vec3d a = pts.get(i).subtract(cam);
 					Vec3d b = pts.get(i + 1).subtract(cam);
 					int alpha = Math.round(230f * (1f - 0.55f * i / n));
-					ribbon(bb, m, a, b, 0.045f, rgb, alpha);
+					float w = (float) Math.max(0.006, Math.min(0.05, a.add(b).multiply(0.5).length() * 0.0032));
+					ribbon(bb, m, a, b, w, rgb, alpha);
 				}
 				Vec3d end = pts.get(n - 1).subtract(cam);
 				float ex = (float) end.x, ey = (float) end.y, ez = (float) end.z;
 				int r = (rgb >> 16) & 255, g = (rgb >> 8) & 255, bl = rgb & 255;
-				UiDraw.cuboid(bb, m, ex - 0.07f, ey - 0.07f, ez - 0.07f, ex + 0.07f, ey + 0.07f, ez + 0.07f, r, g, bl, 255);
-				UiDraw.cuboid(bb, m, ex - 0.2f, ey - 0.2f, ez - 0.2f, ex + 0.2f, ey + 0.2f, ez + 0.2f, r, g, bl, 70);
+				UiDraw.cuboid(bb, m, ex - 0.035f, ey - 0.035f, ez - 0.035f, ex + 0.035f, ey + 0.035f, ez + 0.035f, r, g, bl, 255);
+				UiDraw.cuboid(bb, m, ex - 0.1f, ey - 0.1f, ez - 0.1f, ex + 0.1f, ey + 0.1f, ez + 0.1f, r, g, bl, 55);
 				RenderSystem.enableDepthTest();
 				BufferRenderer.drawWithGlobalProgram(bb.end());
 			}
@@ -435,6 +572,8 @@ public class PlayerGlowClient implements ClientModInitializer {
 		if (s == null || s.isEmpty()) return 0;
 		if (s.isOf(Items.ENDER_PEARL)) return 1;
 		if (s.isOf(Items.SPLASH_POTION) || s.isOf(Items.LINGERING_POTION)) return 2;
+		if (s.isOf(Items.BOW)) return 3;
+		if (s.isOf(Items.TRIDENT)) return 4;
 		return 0;
 	}
 
@@ -449,9 +588,22 @@ public class PlayerGlowClient implements ClientModInitializer {
 		int kind = heldThrowKind(p);
 		if (kind == 0) return 0;
 
-		float speed = kind == 1 ? 1.5f : 0.5f;
-		float roll = kind == 1 ? 0f : -20f;
-		double gravity = kind == 1 ? 0.03 : 0.05;
+		float speed;
+		float roll = 0f;
+		double gravity = 0.05;
+		if (kind == 1) {
+			speed = 1.5f;
+			gravity = 0.03;
+		} else if (kind == 2) {
+			speed = 0.5f;
+			roll = -20f;
+		} else if (kind == 3) {
+			float pull = (p.isUsingItem() && p.getActiveItem().isOf(Items.BOW))
+					? BowItem.getPullProgress(p.getItemUseTime()) : 1f;
+			speed = Math.max(0.3f, pull) * 3.0f;
+		} else {
+			speed = 2.5f;
+		}
 		float pitch = p.getPitch(td), yaw = p.getYaw(td);
 		double rad = Math.PI / 180.0;
 		double fx = -Math.sin(yaw * rad) * Math.cos(pitch * rad);
