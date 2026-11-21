@@ -34,11 +34,13 @@ public class PlayerGlowScreen extends Screen {
 	private static final int W = 372, H = 272, SB = 98, WRAD = 14;
 	private static final int CX = SB + 12, CW = W - SB - 24;
 
-	private static final int CAT_COMBAT = 0, CAT_RENDER = 1;
+	private static final int CAT_COMBAT = 0, CAT_RENDER = 1, CAT_SETTINGS = 2;
 	private static final int VIEW_LIST = -1, VIEW_AIMBOT = 0, VIEW_CRYSTAL = 1, VIEW_ESP = 2, VIEW_HAT = 3;
 
 	// window position offset (kept while the game is running)
 	private static float offX = 0f, offY = 0f;
+	// menu settings (kept while the game is running)
+	private static float menuScale = 1.0f, pendingScale = 1.0f, menuOpacity = 0.88f;
 
 	private static final class Module {
 		final String name, desc;
@@ -150,7 +152,7 @@ public class PlayerGlowScreen extends Screen {
 	private String query = "";
 	private boolean searchFocus = false;
 
-	private final float[] catOn = {1f, 0f};
+	private final float[] catOn = {1f, 0f, 0f};
 	private float backHover = 0f, exitHover = 0f;
 	private Slider dragSlider = null;
 	private boolean movingWindow = false;
@@ -233,6 +235,17 @@ public class PlayerGlowScreen extends Screen {
 			m.w = cw;
 			m.h = ch;
 			i++;
+		}
+		if (query.isEmpty() && cat == CAT_SETTINGS) {
+			pendingScale = menuScale;
+			Slider a = new Slider("Menu size", 50.0, 140.0, 5.0,
+					() -> pendingScale * 100.0, v -> pendingScale = (float) (v / 100.0), "%.0f%%", false);
+			a.x = CX; a.y = 50; a.w = CW; a.h = 36;
+			Slider b = new Slider("Menu opacity", 30.0, 100.0, 5.0,
+					() -> menuOpacity * 100.0, v -> menuOpacity = (float) (v / 100.0), "%.0f%%", false);
+			b.x = CX; b.y = 90; b.w = CW; b.h = 36;
+			sliders.add(a);
+			sliders.add(b);
 		}
 	}
 
@@ -388,7 +401,8 @@ public class PlayerGlowScreen extends Screen {
 
 		this.renderBackground(ctx, mouseX, mouseY, delta);
 
-		float base = Math.max(0.45f, Math.min(1f, Math.min((this.width - 10f) / W, (this.height - 10f) / H)));
+		float screenFit = Math.min((this.width - 10f) / W, (this.height - 10f) / H);
+		float base = Math.max(0.3f, Math.min(screenFit, menuScale));
 		float sa = 0.94f + 0.06f * ease;
 		ts = base * sa;
 		tx = (this.width - W * ts) / 2f + offX;
@@ -402,6 +416,7 @@ public class PlayerGlowScreen extends Screen {
 		// ---- animation state ----
 		catOn[0] += ((cat == CAT_COMBAT && view == VIEW_LIST && query.isEmpty() ? 1f : 0f) - catOn[0]) * k;
 		catOn[1] += ((cat == CAT_RENDER && view == VIEW_LIST && query.isEmpty() ? 1f : 0f) - catOn[1]) * k;
+		catOn[2] += ((cat == CAT_SETTINGS && view == VIEW_LIST && query.isEmpty() ? 1f : 0f) - catOn[2]) * k;
 		boolean overExit = live && inRect(lmx, lmy, 8, H - 36, SB - 16, 26);
 		exitHover += ((overExit ? 1f : 0f) - exitHover) * k;
 		boolean overBack = live && view != VIEW_LIST && Math.hypot(lmx - (CX + 11), lmy - 25) <= 12;
@@ -451,7 +466,7 @@ public class PlayerGlowScreen extends Screen {
 
 		UiDraw.Gfx.begin(ctx, ts);
 		UiDraw.Gfx.shadow(0, 10, W, H, WRAD, 30, fa(0x99000000));
-		UiDraw.Gfx.rr(0, 0, W, H, WRAD, fa(WIN_BG));
+		UiDraw.Gfx.rr(0, 0, W, H, WRAD, fa(alpha(0xFF0D0F13, menuOpacity)));
 		UiDraw.Gfx.stroke(0, 0, W, H, WRAD, 1f, fa(0x26FFFFFF));
 
 		for (Flake f : flakes) {
@@ -468,7 +483,7 @@ public class PlayerGlowScreen extends Screen {
 		// sidebar
 		UiDraw.Gfx.rrGrad(12, 12, 28, 28, 9, fa(C1), fa(C2), 3);
 		UiDraw.Gfx.snowflake(26, 26, 7f, 0.2f, fa(WHITE));
-		for (int i = 0; i < 2; i++) {
+		for (int i = 0; i < 3; i++) {
 			float cy = 64 + i * 26;
 			if (catOn[i] > 0.01f) {
 				UiDraw.Gfx.rrGrad(8, cy, SB - 16, 22, 9, fa(alpha(C1, catOn[i])), fa(alpha(C2, catOn[i])), 1);
@@ -480,9 +495,15 @@ public class PlayerGlowScreen extends Screen {
 					float ca = (float) Math.cos(a * Math.PI / 2), sa2 = (float) Math.sin(a * Math.PI / 2);
 					UiDraw.Gfx.line(22 + ca * 2.5f, cy + 11 + sa2 * 2.5f, 22 + ca * 7.2f, cy + 11 + sa2 * 7.2f, 1.1f, ic);
 				}
-			} else {
+			} else if (i == 1) {
 				UiDraw.Gfx.stroke(15, cy + 7, 14, 8, 4, 1.2f, ic);
 				UiDraw.Gfx.circle(22, cy + 11, 1.9f, ic);
+			} else {
+				UiDraw.Gfx.ringCircle(22, cy + 11, 3.2f, 1.5f, ic);
+				for (int a = 0; a < 8; a++) {
+					float ca = (float) Math.cos(a * Math.PI / 4), sa2 = (float) Math.sin(a * Math.PI / 4);
+					UiDraw.Gfx.line(22 + ca * 3.8f, cy + 11 + sa2 * 3.8f, 22 + ca * 5.8f, cy + 11 + sa2 * 5.8f, 1.7f, ic);
+				}
 			}
 		}
 		if (exitHover > 0.02f) {
@@ -499,6 +520,7 @@ public class PlayerGlowScreen extends Screen {
 			for (Module m : modules) {
 				if (m.visible) drawModuleShapes(m, cf, time);
 			}
+			if (!sliders.isEmpty()) drawSettingsShapes(cf, lmx, lmy);
 		} else {
 			drawSettingsShapes(cf, lmx, lmy);
 		}
@@ -515,6 +537,7 @@ public class PlayerGlowScreen extends Screen {
 		txt(ctx, "Основные", 14, 50, 0.68f, MUTED);
 		txt(ctx, "Combat", 36, 64 + 6.5f, 0.9f, lerp(MUTED, WHITE, catOn[0]));
 		txt(ctx, "Render", 36, 90 + 6.5f, 0.9f, lerp(MUTED, WHITE, catOn[1]));
+		txt(ctx, "Settings", 36, 116 + 6.5f, 0.9f, lerp(MUTED, WHITE, catOn[2]));
 		txt(ctx, "Выйти", 36, H - 36 + 8.5f, 0.9f, lerp(MUTED, WHITE, exitHover));
 
 		if (view == VIEW_LIST) {
@@ -527,6 +550,7 @@ public class PlayerGlowScreen extends Screen {
 			for (Module m : modules) {
 				if (m.visible) drawModuleText(ctx, m, cf);
 			}
+			if (!sliders.isEmpty()) drawSettingsText(ctx, cf);
 		} else {
 			drawSettingsText(ctx, cf);
 		}
@@ -591,12 +615,13 @@ public class PlayerGlowScreen extends Screen {
 	}
 
 	private void drawSettingsShapes(float cf, double lmx, double lmy) {
-		// back button
-		UiDraw.Gfx.circle(CX + 11, 25, 11, fa(alpha(CARD_OFF, 1f + backHover)));
-		UiDraw.Gfx.ringCircle(CX + 11, 25, 11, 1f, fa(BORDER));
-		int bc = fa(lerp(MUTED, WHITE, backHover));
-		UiDraw.Gfx.line(CX + 12.5f, 20.5f, CX + 8.5f, 25f, 1.5f, bc);
-		UiDraw.Gfx.line(CX + 8.5f, 25f, CX + 12.5f, 29.5f, 1.5f, bc);
+		if (view != VIEW_LIST) {
+			UiDraw.Gfx.circle(CX + 11, 25, 11, fa(alpha(CARD_OFF, 1f + backHover)));
+			UiDraw.Gfx.ringCircle(CX + 11, 25, 11, 1f, fa(BORDER));
+			int bc = fa(lerp(MUTED, WHITE, backHover));
+			UiDraw.Gfx.line(CX + 12.5f, 20.5f, CX + 8.5f, 25f, 1.5f, bc);
+			UiDraw.Gfx.line(CX + 8.5f, 25f, CX + 12.5f, 29.5f, 1.5f, bc);
+		}
 
 		for (Toggle t : toggles) {
 			UiDraw.Gfx.rr(t.x, t.y, t.w, t.h, 9, fa(alpha(CARD_OFF, cf)));
@@ -645,7 +670,7 @@ public class PlayerGlowScreen extends Screen {
 	}
 
 	private void drawSettingsText(DrawContext ctx, float cf) {
-		txt(ctx, viewTitle, CX + 30, 19.5f, 1.1f, TEXT);
+		if (view != VIEW_LIST) txt(ctx, viewTitle, CX + 30, 19.5f, 1.1f, TEXT);
 		for (Toggle t : toggles) {
 			txt(ctx, t.label, t.x + 11, t.y + 8.5f, 0.9f, alpha(lerp(MUTED, WHITE, 0.4f + 0.6f * t.on), cf));
 		}
@@ -697,7 +722,7 @@ public class PlayerGlowScreen extends Screen {
 			this.close();
 			return true;
 		}
-		for (int i = 0; i < 2; i++) {
+		for (int i = 0; i < 3; i++) {
 			if (button == 0 && inRect(lmx, lmy, 8, 64 + i * 26, SB - 16, 22)) {
 				view = VIEW_LIST;
 				setCat(i);
@@ -711,6 +736,15 @@ public class PlayerGlowScreen extends Screen {
 				return true;
 			}
 			searchFocus = false;
+			if (button == 0) {
+				for (Slider sl : sliders) {
+					if (sl.contains(lmx, lmy)) {
+						dragSlider = sl;
+						updateSlider(sl, lmx);
+						return true;
+					}
+				}
+			}
 			for (Module m : modules) {
 				if (!m.visible || !m.contains(lmx, lmy)) continue;
 				boolean onGear = m.gearView >= 0 && Math.hypot(lmx - gearX(m), lmy - gearY(m)) <= 9;
@@ -785,6 +819,7 @@ public class PlayerGlowScreen extends Screen {
 		if (button == 0) {
 			dragSlider = null;
 			movingWindow = false;
+			menuScale = pendingScale;
 		}
 		return super.mouseReleased(mouseX, mouseY, button);
 	}
