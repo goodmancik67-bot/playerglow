@@ -88,17 +88,28 @@ public class PlayerGlowClient implements ClientModInitializer {
 
 	public static boolean isSword(ItemStack stack) {
 		if (stack == null || stack.isEmpty()) return false;
-		return Registries.ITEM.getId(stack.getItem()).getPath().endsWith("_sword");
+		return glowKind(stack) != null;
 	}
 
-	private static final net.minecraft.util.Identifier GLOW_MODEL = net.minecraft.util.Identifier.of("playerglow", "glow_sword");
+	/** sword / pickaxe / axe / shovel -> which glow model to use (null = not a glow tool). */
+	private static String glowKind(ItemStack stack) {
+		String path = Registries.ITEM.getId(stack.getItem()).getPath();
+		if (path.endsWith("_sword")) return "sword";
+		if (path.endsWith("_pickaxe")) return "pickaxe";
+		if (path.endsWith("_axe")) return "axe";
+		if (path.endsWith("_shovel")) return "shovel";
+		return null;
+	}
 
 	/** Glow Hand: draws swords with our own purple animated item model instead of the vanilla one. */
 	public static ItemStack glowStack(ItemStack stack) {
 		try {
-			if (!swordShimmer || !isSword(stack)) return stack;
+			if (!swordShimmer || stack == null || stack.isEmpty()) return stack;
+			String kind = glowKind(stack);
+			if (kind == null) return stack;
 			ItemStack c = stack.copy();
-			c.set(net.minecraft.component.DataComponentTypes.ITEM_MODEL, GLOW_MODEL);
+			c.set(net.minecraft.component.DataComponentTypes.ITEM_MODEL,
+					net.minecraft.util.Identifier.of("playerglow", "glow_" + kind));
 			return c;
 		} catch (Throwable t) {
 			return stack;
