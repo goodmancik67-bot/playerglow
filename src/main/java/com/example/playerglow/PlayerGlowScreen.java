@@ -31,11 +31,13 @@ import static com.example.playerglow.UiDraw.lerp;
 
 public class PlayerGlowScreen extends Screen {
 	// design size of the window (GUI units); everything is laid out in this space
-	private static final int W = 372, H = 272, SB = 98, WRAD = 14;
+	private static final int W = 372, H = 284, SB = 98, WRAD = 14;
 	private static final int CX = SB + 12, CW = W - SB - 24;
 
-	private static final int CAT_COMBAT = 0, CAT_RENDER = 1, CAT_SETTINGS = 2;
-	private static final int VIEW_LIST = -1, VIEW_AIMBOT = 0, VIEW_CRYSTAL = 1, VIEW_ESP = 2, VIEW_HAT = 3, VIEW_ITEM = 4;
+	private static final int CAT_COMBAT = 0, CAT_RENDER = 1, CAT_SETTINGS = 2, CAT_UTILS = 3;
+	private static final int[] CAT_ORDER = { CAT_COMBAT, CAT_RENDER, CAT_UTILS, CAT_SETTINGS };
+	private static final String[] CAT_NAMES = { "Combat", "Render", "Settings", "Utilities" };
+	private static final int VIEW_LIST = -1, VIEW_AIMBOT = 0, VIEW_CRYSTAL = 1, VIEW_ESP = 2, VIEW_HAT = 3, VIEW_ITEM = 4, VIEW_FASTPLACE = 5;
 
 	// window position offset (kept while the game is running)
 	static float offX = 0f, offY = 0f;
@@ -153,7 +155,7 @@ public class PlayerGlowScreen extends Screen {
 	private String query = "";
 	private boolean searchFocus = false;
 
-	private final float[] catOn = {1f, 0f, 0f};
+	private final float[] catOn = {1f, 0f, 0f, 0f};
 	private float backHover = 0f, exitHover = 0f;
 	private Slider dragSlider = null;
 	private boolean movingWindow = false;
@@ -177,6 +179,8 @@ public class PlayerGlowScreen extends Screen {
 				() -> PlayerGlowClient.crystalAura, v -> PlayerGlowClient.crystalAura = v));
 		modules.add(new Module("TriggerBot", "Бьёт цель в прицеле\nровно в тайминг", CAT_COMBAT, -1,
 				() -> PlayerGlowClient.triggerbot, v -> PlayerGlowClient.triggerbot = v));
+		modules.add(new Module("Auto Totem", "Сам кладёт тотем\nбессмертия в левую руку", CAT_COMBAT, -1,
+				() -> PlayerGlowClient.autoTotem, v -> PlayerGlowClient.autoTotem = v));
 		modules.add(new Module("Criticals", "Каждый удар\nстановится критом", CAT_COMBAT, -1,
 				() -> PlayerGlowClient.criticals, v -> PlayerGlowClient.criticals = v));
 		modules.add(new Module("Auto Shift", "Приседает после удара\nпо мобу или игроку", CAT_COMBAT, -1,
@@ -204,6 +208,12 @@ public class PlayerGlowScreen extends Screen {
 				() -> PlayerGlowClient.itemEsp, v -> PlayerGlowClient.itemEsp = v));
 		modules.add(new Module("Block Outline", "Белая подсветка блока\nна который смотришь", CAT_RENDER, -1,
 				() -> PlayerGlowClient.blockOutline, v -> PlayerGlowClient.blockOutline = v));
+		modules.add(new Module("Tracers", "Линии от прицела\nк игрокам", CAT_RENDER, -1,
+				() -> PlayerGlowClient.tracers, v -> PlayerGlowClient.tracers = v));
+		modules.add(new Module("Fast Place", "Очень быстро ставит\nблоки, скорость в настройках", CAT_UTILS, VIEW_FASTPLACE,
+				() -> PlayerGlowClient.fastPlace, v -> PlayerGlowClient.fastPlace = v));
+		modules.add(new Module("Auto Sprint", "Всегда бежишь,\nпока идёшь вперёд", CAT_UTILS, -1,
+				() -> PlayerGlowClient.autoSprint, v -> PlayerGlowClient.autoSprint = v));
 		modules.add(new Module("Trajectories", "Линия полёта перла,\nзелий, лука и трезубца", CAT_RENDER, -1,
 				() -> PlayerGlowClient.trajectories, v -> PlayerGlowClient.trajectories = v));
 	}
@@ -278,8 +288,8 @@ public class PlayerGlowScreen extends Screen {
 		int count = 0;
 		for (Module m : modules) if (matches(m)) count++;
 		compact = count > 8;
-		float ch = compact ? 40f : 44f;
-		float gap = compact ? 5f : 8f;
+		float ch = compact ? 34f : 44f;
+		float gap = compact ? 4f : 8f;
 		float top = compact ? 46f : 50f;
 		int i = 0;
 		for (Module m : modules) {
@@ -336,6 +346,10 @@ public class PlayerGlowScreen extends Screen {
 					v -> PlayerGlowClient.espColor = UiDraw.hsv((float) v, 0.75f, 1f), "%.0f", true));
 			ss.add(new Slider("Opacity", 10.0, 100.0, 5.0,
 					() -> PlayerGlowClient.espAlpha * 100.0, v -> PlayerGlowClient.espAlpha = (float) (v / 100.0), "%.0f%%", false));
+		} else if (view == VIEW_FASTPLACE) {
+			viewTitle = "Fast Place";
+			ss.add(new Slider("Delay", 0.0, 4.0, 1.0, () -> PlayerGlowClient.fastPlaceDelay,
+					v -> PlayerGlowClient.fastPlaceDelay = (float) v, "%.0f tick", false));
 		} else if (view == VIEW_ITEM) {
 			viewTitle = "Item ESP";
 			sw = new Swatches(() -> PlayerGlowClient.itemColor, v -> PlayerGlowClient.itemColor = v);
@@ -480,6 +494,7 @@ public class PlayerGlowScreen extends Screen {
 		catOn[0] += ((cat == CAT_COMBAT && view == VIEW_LIST && query.isEmpty() ? 1f : 0f) - catOn[0]) * k;
 		catOn[1] += ((cat == CAT_RENDER && view == VIEW_LIST && query.isEmpty() ? 1f : 0f) - catOn[1]) * k;
 		catOn[2] += ((cat == CAT_SETTINGS && view == VIEW_LIST && query.isEmpty() ? 1f : 0f) - catOn[2]) * k;
+		catOn[3] += ((cat == CAT_UTILS && view == VIEW_LIST && query.isEmpty() ? 1f : 0f) - catOn[3]) * k;
 		boolean overExit = live && inRect(lmx, lmy, 8, H - 36, SB - 16, 26);
 		exitHover += ((overExit ? 1f : 0f) - exitHover) * k;
 		boolean overBack = live && view != VIEW_LIST && Math.hypot(lmx - (CX + 11), lmy - 25) <= 12;
@@ -546,8 +561,9 @@ public class PlayerGlowScreen extends Screen {
 		// sidebar
 		UiDraw.Gfx.rrGrad(12, 12, 28, 28, 9, fa(C1), fa(C2), 3);
 		UiDraw.Gfx.snowflake(26, 26, 7f, 0.2f, fa(WHITE));
-		for (int i = 0; i < 3; i++) {
-			float cy = 64 + i * 26;
+		for (int slot = 0; slot < 4; slot++) {
+			int i = CAT_ORDER[slot];
+			float cy = 64 + slot * 26;
 			if (catOn[i] > 0.01f) {
 				UiDraw.Gfx.rrGrad(8, cy, SB - 16, 22, 9, fa(alpha(C1, catOn[i])), fa(alpha(C2, catOn[i])), 1);
 			}
@@ -561,6 +577,11 @@ public class PlayerGlowScreen extends Screen {
 			} else if (i == 1) {
 				UiDraw.Gfx.stroke(15, cy + 7, 14, 8, 4, 1.2f, ic);
 				UiDraw.Gfx.circle(22, cy + 11, 1.9f, ic);
+			} else if (i == CAT_UTILS) {
+				for (int r = 0; r < 3; r++) {
+					UiDraw.Gfx.line(15, cy + 6.5f + r * 4.5f, 29, cy + 6.5f + r * 4.5f, 1.2f, ic);
+					UiDraw.Gfx.circle(17.5f + ((r * 5) % 9), cy + 6.5f + r * 4.5f, 1.9f, ic);
+				}
 			} else {
 				UiDraw.Gfx.ringCircle(22, cy + 11, 3.2f, 1.5f, ic);
 				for (int a = 0; a < 8; a++) {
@@ -602,9 +623,10 @@ public class PlayerGlowScreen extends Screen {
 		txt(ctx, "Playboi Carti", 46, 14, 0.85f, TEXT);
 		txt(ctx, "Client", 46, 26, 0.7f, MUTED);
 		txt(ctx, "Основные", 14, 50, 0.68f, MUTED);
-		txt(ctx, "Combat", 36, 64 + 6.5f, 0.9f, lerp(MUTED, WHITE, catOn[0]));
-		txt(ctx, "Render", 36, 90 + 6.5f, 0.9f, lerp(MUTED, WHITE, catOn[1]));
-		txt(ctx, "Settings", 36, 116 + 6.5f, 0.9f, lerp(MUTED, WHITE, catOn[2]));
+		for (int slot = 0; slot < 4; slot++) {
+			int ci = CAT_ORDER[slot];
+			txt(ctx, ci == CAT_UTILS ? "Utilities" : CAT_NAMES[ci], 36, 64 + slot * 26 + 6.5f, 0.9f, lerp(MUTED, WHITE, catOn[ci]));
+		}
 		txt(ctx, "Выйти", 36, H - 36 + 8.5f, 0.9f, lerp(MUTED, WHITE, exitHover));
 
 		if (view == VIEW_LIST) {
@@ -673,11 +695,11 @@ public class PlayerGlowScreen extends Screen {
 
 	private void drawModuleText(DrawContext ctx, Module m, float cf) {
 		int nameCol = lerp(TEXT, WHITE, m.on);
-		txt(ctx, m.name, m.x + 9, m.y + (compact ? 6f : 8f), 0.95f, alpha(nameCol, cf));
+		txt(ctx, m.name, m.x + 9, m.y + (compact ? 5f : 8f), 0.95f, alpha(nameCol, cf));
 		int dcol = lerp(MUTED, 0xDDFFFFFF, m.on);
 		String[] lines = m.desc.split("\n");
 		for (int i = 0; i < lines.length; i++) {
-			txt(ctx, lines[i], m.x + 9, m.y + (compact ? 19f : 22f) + i * 9f, 0.72f, alpha(dcol, cf));
+			txt(ctx, lines[i], m.x + 9, m.y + (compact ? 15.5f : 22f) + i * (compact ? 8.5f : 9f), 0.72f, alpha(dcol, cf));
 		}
 	}
 
@@ -789,10 +811,10 @@ public class PlayerGlowScreen extends Screen {
 			this.close();
 			return true;
 		}
-		for (int i = 0; i < 3; i++) {
-			if (button == 0 && inRect(lmx, lmy, 8, 64 + i * 26, SB - 16, 22)) {
+		for (int slot = 0; slot < 4; slot++) {
+			if (button == 0 && inRect(lmx, lmy, 8, 64 + slot * 26, SB - 16, 22)) {
 				view = VIEW_LIST;
-				setCat(i);
+				setCat(CAT_ORDER[slot]);
 				return true;
 			}
 		}
