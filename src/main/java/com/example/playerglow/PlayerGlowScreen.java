@@ -198,7 +198,7 @@ public class PlayerGlowScreen extends Screen {
 				() -> PlayerGlowClient.hitMarker, v -> PlayerGlowClient.hitMarker = v));
 		modules.add(new Module("Info HUD", "FPS, координаты\nи направление взгляда", CAT_RENDER, -1,
 				() -> PlayerGlowClient.infoHud, v -> PlayerGlowClient.infoHud = v));
-		modules.add(new Module("Sword Shimmer", "Мечи переливаются от\nчёрного к серому", CAT_RENDER, -1,
+		modules.add(new Module("Sword Shimmer", "Фиолетовые мечи\nс переливом", CAT_RENDER, -1,
 				() -> PlayerGlowClient.swordShimmer, v -> PlayerGlowClient.swordShimmer = v));
 		modules.add(new Module("Item ESP", "3D-бокс вокруг предметов\nна земле", CAT_RENDER, VIEW_ITEM,
 				() -> PlayerGlowClient.itemEsp, v -> PlayerGlowClient.itemEsp = v));
@@ -232,6 +232,45 @@ public class PlayerGlowScreen extends Screen {
 			return m.name.toLowerCase().contains(query.toLowerCase());
 		}
 		return m.cat == cat;
+	}
+
+	/** Two fluffy snow drifts sitting on the bottom edge of the window. */
+	private void drawSnowDrifts() {
+		float[][] d = { { 124f, 100f, 24f }, { 314f, 88f, 20f } };
+		int white = fa(0xF2FFFFFF), shade = fa(0xFFD3E2F5);
+		for (float[] m : d) {
+			float cx = m[0], w = m[1], h = m[2];
+			float by = H - 2f;
+			UiDraw.Gfx.shadow(cx - w / 2f, by - h, w, h, h / 2f, 6f, fa(0x30AFCBFF));
+			UiDraw.Gfx.rr(cx - w / 2f, by - h * 0.55f, w, h * 0.55f, h * 0.27f, shade);
+			UiDraw.Gfx.circle(cx - w * 0.30f, by - h * 0.50f, h * 0.38f, white);
+			UiDraw.Gfx.circle(cx - w * 0.08f, by - h * 0.62f, h * 0.50f, white);
+			UiDraw.Gfx.circle(cx + w * 0.16f, by - h * 0.55f, h * 0.42f, white);
+			UiDraw.Gfx.circle(cx + w * 0.34f, by - h * 0.42f, h * 0.32f, white);
+			UiDraw.Gfx.rr(cx - w * 0.46f, by - h * 0.40f, w * 0.92f, h * 0.38f, h * 0.19f, white);
+		}
+	}
+
+	/** Santa hat perched on the top-right corner of the window. */
+	private void drawSantaHat(float time) {
+		float sway = (float) Math.sin(time * 1.4f) * 1.6f;
+		int red = fa(0xFFD9252E), redDark = fa(0xFFA81820), white = fa(0xFFFFFFFF), fur = fa(0xFFEAF0F8);
+		// body: chain of circles from the brim (lower right) bending up-left to the tip
+		float[][] body = { { 358f, 8f, 17f }, { 352f, -2f, 16.5f }, { 345f, -11f, 15f }, { 337f, -19f, 13f },
+				{ 328f, -24f, 10.5f }, { 319f + sway * 0.4f, -25f, 8f }, { 311f + sway * 0.8f, -22f, 6f } };
+		for (float[] c : body) UiDraw.Gfx.circle(c[0] + 1.5f, c[1] + 2f, c[2], redDark);
+		for (float[] c : body) UiDraw.Gfx.circle(c[0], c[1], c[2], red);
+		// highlight
+		UiDraw.Gfx.circle(346f, -8f, 5f, fa(0x35FFFFFF));
+		// fur brim (rounded bar + puffs)
+		UiDraw.Gfx.line(338f, 12f, 378f, 26f, 13f, fur);
+		for (int i = 0; i < 6; i++) {
+			float t = i / 5f;
+			UiDraw.Gfx.circle(338f + 40f * t, 12f + 14f * t, 7f, white);
+		}
+		// pompom
+		UiDraw.Gfx.circle(306f + sway, -19f, 7.5f, white);
+		UiDraw.Gfx.circle(304.5f + sway, -20.5f, 2.4f, fa(0x66C7D9F0));
 	}
 
 	private void layoutList() {
@@ -539,6 +578,8 @@ public class PlayerGlowScreen extends Screen {
 			UiDraw.Gfx.line(22, H - 29, 22, H - 23, 1.4f, ec);
 		}
 
+		drawSnowDrifts();
+
 		if (view == VIEW_LIST) {
 			drawSearchShapes(ctx, time);
 			for (Module m : modules) {
@@ -548,6 +589,8 @@ public class PlayerGlowScreen extends Screen {
 		} else {
 			drawSettingsShapes(cf, lmx, lmy);
 		}
+
+		drawSantaHat(time);
 
 		for (Spark sp : sparks) {
 			float a = 1f - sp.age / sp.life;
