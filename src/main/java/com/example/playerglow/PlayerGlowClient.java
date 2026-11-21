@@ -93,14 +93,33 @@ public class PlayerGlowClient implements ClientModInitializer {
 
 	private static net.minecraft.client.texture.Sprite swordSprite = null;
 	private static final java.util.IdentityHashMap<net.minecraft.client.render.model.BakedQuad, net.minecraft.client.render.model.BakedQuad> swordCache = new java.util.IdentityHashMap<>();
-	private static final net.minecraft.client.util.SpriteIdentifier SWORD_ID = new net.minecraft.client.util.SpriteIdentifier(
+	private static final net.minecraft.client.util.SpriteIdentifier SWORD_ITEMS = new net.minecraft.client.util.SpriteIdentifier(
+			net.minecraft.util.Identifier.of("minecraft", "textures/atlas/items.png"),
+			net.minecraft.util.Identifier.of("playerglow", "item/purple_sword"));
+	private static final net.minecraft.client.util.SpriteIdentifier SWORD_BLOCKS = new net.minecraft.client.util.SpriteIdentifier(
 			net.minecraft.util.Identifier.of("minecraft", "textures/atlas/blocks.png"),
 			net.minecraft.util.Identifier.of("playerglow", "item/purple_sword"));
+
+	private static boolean isOurs(net.minecraft.client.texture.Sprite s) {
+		try {
+			return s != null && s.getContents().getId().getNamespace().equals("playerglow");
+		} catch (Throwable t) {
+			return false;
+		}
+	}
+
+	private static net.minecraft.client.texture.Sprite findSwordSprite() {
+		net.minecraft.client.texture.Sprite s = SWORD_ITEMS.getSprite();
+		if (isOurs(s)) return s;
+		s = SWORD_BLOCKS.getSprite();
+		return isOurs(s) ? s : null;
+	}
 
 	/** Re-maps a sword quad's UVs from its vanilla sprite onto the animated purple sword sprite. */
 	public static net.minecraft.client.render.model.BakedQuad swordQuad(net.minecraft.client.render.model.BakedQuad q) {
 		try {
-			net.minecraft.client.texture.Sprite target = SWORD_ID.getSprite();
+			net.minecraft.client.texture.Sprite target = findSwordSprite();
+			if (target == null) return q; // texture missing -> keep the normal sword
 			if (target != swordSprite) {
 				swordCache.clear();
 				swordSprite = target;
