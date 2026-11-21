@@ -178,6 +178,8 @@ public class PlayerGlowScreen extends Screen {
 				() -> PlayerGlowClient.triggerbot, v -> PlayerGlowClient.triggerbot = v));
 		modules.add(new Module("Criticals", "Каждый удар\nстановится критом", CAT_COMBAT, -1,
 				() -> PlayerGlowClient.criticals, v -> PlayerGlowClient.criticals = v));
+		modules.add(new Module("Auto Shift", "Приседает после удара\nпо мобу или игроку", CAT_COMBAT, -1,
+				() -> PlayerGlowClient.autoShift, v -> PlayerGlowClient.autoShift = v));
 
 		modules.add(new Module("Player Glow", "3D-бокс вокруг игроков\nи мобов сквозь стены", CAT_RENDER, VIEW_ESP,
 				() -> PlayerGlowClient.enabled, v -> PlayerGlowClient.enabled = v));
@@ -197,6 +199,8 @@ public class PlayerGlowScreen extends Screen {
 				() -> PlayerGlowClient.infoHud, v -> PlayerGlowClient.infoHud = v));
 		modules.add(new Module("Sword Shimmer", "Мечи переливаются от\nчёрного к серому", CAT_RENDER, -1,
 				() -> PlayerGlowClient.swordShimmer, v -> PlayerGlowClient.swordShimmer = v));
+		modules.add(new Module("Trajectories", "Линия полёта перла\nи зелий до цели", CAT_RENDER, -1,
+				() -> PlayerGlowClient.trajectories, v -> PlayerGlowClient.trajectories = v));
 	}
 
 	// ---------- layout ----------
