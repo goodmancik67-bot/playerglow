@@ -35,7 +35,7 @@ public class PlayerGlowScreen extends Screen {
 	private static final int CX = SB + 12, CW = W - SB - 24;
 
 	private static final int CAT_COMBAT = 0, CAT_RENDER = 1, CAT_SETTINGS = 2;
-	private static final int VIEW_LIST = -1, VIEW_AIMBOT = 0, VIEW_CRYSTAL = 1, VIEW_ESP = 2, VIEW_HAT = 3;
+	private static final int VIEW_LIST = -1, VIEW_AIMBOT = 0, VIEW_CRYSTAL = 1, VIEW_ESP = 2, VIEW_HAT = 3, VIEW_ITEM = 4;
 
 	// window position offset (kept while the game is running)
 	static float offX = 0f, offY = 0f;
@@ -148,6 +148,7 @@ public class PlayerGlowScreen extends Screen {
 
 	private int cat = CAT_COMBAT;
 	private int view = VIEW_LIST;
+	private boolean compact = false;
 	private String viewTitle = "";
 	private String query = "";
 	private boolean searchFocus = false;
@@ -199,6 +200,10 @@ public class PlayerGlowScreen extends Screen {
 				() -> PlayerGlowClient.infoHud, v -> PlayerGlowClient.infoHud = v));
 		modules.add(new Module("Sword Shimmer", "Мечи переливаются от\nчёрного к серому", CAT_RENDER, -1,
 				() -> PlayerGlowClient.swordShimmer, v -> PlayerGlowClient.swordShimmer = v));
+		modules.add(new Module("Item ESP", "3D-бокс вокруг предметов\nна земле", CAT_RENDER, VIEW_ITEM,
+				() -> PlayerGlowClient.itemEsp, v -> PlayerGlowClient.itemEsp = v));
+		modules.add(new Module("Block Outline", "Белая подсветка блока\nна который смотришь", CAT_RENDER, -1,
+				() -> PlayerGlowClient.blockOutline, v -> PlayerGlowClient.blockOutline = v));
 		modules.add(new Module("Trajectories", "Линия полёта перла,\nзелий, лука и трезубца", CAT_RENDER, -1,
 				() -> PlayerGlowClient.trajectories, v -> PlayerGlowClient.trajectories = v));
 	}
@@ -231,13 +236,18 @@ public class PlayerGlowScreen extends Screen {
 
 	private void layoutList() {
 		float cw = (CW - 8) / 2f;
-		float ch = 44f;
+		int count = 0;
+		for (Module m : modules) if (matches(m)) count++;
+		compact = count > 8;
+		float ch = compact ? 40f : 44f;
+		float gap = compact ? 5f : 8f;
+		float top = compact ? 46f : 50f;
 		int i = 0;
 		for (Module m : modules) {
 			m.visible = matches(m);
 			if (!m.visible) continue;
 			m.x = CX + (i % 2) * (cw + 8);
-			m.y = 50 + (i / 2) * (ch + 8);
+			m.y = top + (i / 2) * (ch + gap);
 			m.w = cw;
 			m.h = ch;
 			i++;
@@ -287,6 +297,14 @@ public class PlayerGlowScreen extends Screen {
 					v -> PlayerGlowClient.espColor = UiDraw.hsv((float) v, 0.75f, 1f), "%.0f", true));
 			ss.add(new Slider("Opacity", 10.0, 100.0, 5.0,
 					() -> PlayerGlowClient.espAlpha * 100.0, v -> PlayerGlowClient.espAlpha = (float) (v / 100.0), "%.0f%%", false));
+		} else if (view == VIEW_ITEM) {
+			viewTitle = "Item ESP";
+			sw = new Swatches(() -> PlayerGlowClient.itemColor, v -> PlayerGlowClient.itemColor = v);
+			ss.add(new Slider("Hue", 0.0, 360.0, 1.0,
+					() -> UiDraw.hueOf(PlayerGlowClient.itemColor),
+					v -> PlayerGlowClient.itemColor = UiDraw.hsv((float) v, 0.75f, 1f), "%.0f", true));
+			ss.add(new Slider("Opacity", 10.0, 100.0, 5.0,
+					() -> PlayerGlowClient.itemAlpha * 100.0, v -> PlayerGlowClient.itemAlpha = (float) (v / 100.0), "%.0f%%", false));
 		} else {
 			viewTitle = "China Hat";
 			ts.add(new Toggle("Players", () -> PlayerGlowClient.hatPlayers, v -> PlayerGlowClient.hatPlayers = v));
@@ -612,11 +630,11 @@ public class PlayerGlowScreen extends Screen {
 
 	private void drawModuleText(DrawContext ctx, Module m, float cf) {
 		int nameCol = lerp(TEXT, WHITE, m.on);
-		txt(ctx, m.name, m.x + 9, m.y + 8, 0.95f, alpha(nameCol, cf));
+		txt(ctx, m.name, m.x + 9, m.y + (compact ? 6f : 8f), 0.95f, alpha(nameCol, cf));
 		int dcol = lerp(MUTED, 0xDDFFFFFF, m.on);
 		String[] lines = m.desc.split("\n");
 		for (int i = 0; i < lines.length; i++) {
-			txt(ctx, lines[i], m.x + 9, m.y + 22 + i * 9f, 0.72f, alpha(dcol, cf));
+			txt(ctx, lines[i], m.x + 9, m.y + (compact ? 19f : 22f) + i * 9f, 0.72f, alpha(dcol, cf));
 		}
 	}
 
