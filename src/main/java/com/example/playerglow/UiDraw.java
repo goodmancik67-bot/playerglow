@@ -421,6 +421,64 @@ public final class UiDraw {
 		quad(bb, m, x1, y2, z1, x2, y2, z1, x2, y2, z2, x1, y2, z2, r, g, b, a);
 	}
 
+	/** One glowing elongated crystal (flat bipyramid), spinning around its axis and tilted. */
+	public static void crystal(BufferBuilder bb, Matrix4f m, float cx, float cy, float cz,
+			float len, float wid, float spin, float tilt, float tiltDir, int rgb, int a, boolean shaded) {
+		float wz = wid * 0.55f;
+		float[][] v = {
+				{ 0f, len, 0f }, { 0f, -len, 0f },
+				{ wid, 0f, 0f }, { 0f, 0f, wz }, { -wid, 0f, 0f }, { 0f, 0f, -wz } };
+		float cs = (float) Math.cos(spin), sn = (float) Math.sin(spin);
+		float ct = (float) Math.cos(tilt), st = (float) Math.sin(tilt);
+		float cd = (float) Math.cos(tiltDir), sd = (float) Math.sin(tiltDir);
+		float[][] p = new float[6][3];
+		for (int i = 0; i < 6; i++) {
+			float x = v[i][0], y = v[i][1], z = v[i][2];
+			float x1 = x * cs + z * sn, z1 = -x * sn + z * cs; // spin around Y
+			float y2 = y * ct - z1 * st, z2 = y * st + z1 * ct; // tilt around X
+			float x3 = x1 * cd + z2 * sd, z3 = -x1 * sd + z2 * cd; // turn around Y
+			p[i][0] = cx + x3;
+			p[i][1] = cy + y2;
+			p[i][2] = cz + z3;
+		}
+		int r0 = (rgb >> 16) & 255, g0 = (rgb >> 8) & 255, b0 = rgb & 255;
+		float[] shade = { 1.0f, 0.88f, 0.78f, 0.92f, 0.82f, 0.7f, 0.76f, 0.86f };
+		for (int f = 0; f < 8; f++) {
+			int apex = f < 4 ? 0 : 1;
+			int e0 = 2 + (f % 4), e1 = 2 + ((f + 1) % 4);
+			float sh = shaded ? shade[f] : 1f;
+			int r = Math.min(255, Math.round(r0 * sh + (shaded ? 22 : 0)));
+			int g = Math.min(255, Math.round(g0 * sh + (shaded ? 22 : 0)));
+			int b = Math.min(255, Math.round(b0 * sh + (shaded ? 22 : 0)));
+			quad(bb, m, p[apex][0], p[apex][1], p[apex][2], p[e0][0], p[e0][1], p[e0][2],
+					p[e1][0], p[e1][1], p[e1][2], p[e1][0], p[e1][1], p[e1][2], r, g, b, a);
+		}
+	}
+
+	/** Glowing petals orbiting the crosshair (Target ESP). */
+	public static void drawCrosshairOrbit(DrawContext c) {
+		if (!PlayerGlowClient.targetEsp || !PlayerGlowClient.targetCross) return;
+		float cx = c.getScaledWindowWidth() / 2f, cy = c.getScaledWindowHeight() / 2f;
+		double t = System.nanoTime() / 1_000_000_000.0;
+		float spd = PlayerGlowClient.targetSpeed;
+		int rgb = PlayerGlowClient.targetColor & 0xFFFFFF;
+		float al = PlayerGlowClient.targetAlpha;
+		int n = 7;
+		Gfx.begin(c, 1f);
+		for (int i = 0; i < n; i++) {
+			float ang = (float) (t * spd * 1.1 + i * Math.PI * 2 / n);
+			float rad = 13f + 3.2f * (float) Math.sin(t * 1.8 + i * 1.9);
+			float px = cx + (float) Math.cos(ang) * rad, py = cy + (float) Math.sin(ang) * rad;
+			float tw = 0.7f + 0.3f * (float) Math.sin(t * 4 + i * 2.3);
+			float dx = (float) Math.cos(ang + Math.PI / 2), dy = (float) Math.sin(ang + Math.PI / 2);
+			Gfx.circle(px, py, 6.5f, alpha(0xFF000000 | rgb, 0.10f * al * tw));
+			Gfx.circle(px, py, 4.2f, alpha(0xFF000000 | rgb, 0.18f * al * tw));
+			Gfx.line(px - dx * 2.4f, py - dy * 2.4f, px + dx * 2.4f, py + dy * 2.4f, 3.0f, alpha(0xFF000000 | rgb, 0.95f * al * tw));
+			Gfx.circle(px, py, 1.3f, alpha(0xFFFFFFFF, 0.9f * al * tw));
+		}
+		Gfx.end();
+	}
+
 	/** Translucent 3D box with solid edges. */
 	public static void espBox(BufferBuilder bb, Matrix4f m,
 			float x1, float y1, float z1, float x2, float y2, float z2,
