@@ -37,7 +37,7 @@ public class PlayerGlowScreen extends Screen {
 	private static final int CAT_COMBAT = 0, CAT_RENDER = 1, CAT_SETTINGS = 2, CAT_UTILS = 3;
 	private static final int[] CAT_ORDER = { CAT_COMBAT, CAT_RENDER, CAT_UTILS, CAT_SETTINGS };
 	private static final String[] CAT_NAMES = { "Combat", "Render", "Settings", "Utilities" };
-	private static final int VIEW_LIST = -1, VIEW_AIMBOT = 0, VIEW_CRYSTAL = 1, VIEW_ESP = 2, VIEW_HAT = 3, VIEW_ITEM = 4, VIEW_FASTPLACE = 5, VIEW_SPRINT = 6, VIEW_BLOCK = 7, VIEW_VEL = 8, VIEW_TARGET = 9;
+	private static final int VIEW_LIST = -1, VIEW_AIMBOT = 0, VIEW_CRYSTAL = 1, VIEW_ESP = 2, VIEW_HAT = 3, VIEW_ITEM = 4, VIEW_FASTPLACE = 5, VIEW_SPRINT = 6, VIEW_BLOCK = 7, VIEW_VEL = 8, VIEW_TARGET = 9, VIEW_ARROW = 10;
 	private boolean tight = false;
 	private Module listening = null;
 
@@ -220,6 +220,8 @@ public class PlayerGlowScreen extends Screen {
 				() -> PlayerGlowClient.armorHud, v -> PlayerGlowClient.armorHud = v));
 		modules.add(new Module("Target ESP", "Кристаллы крутятся вокруг\nцели под прицелом", CAT_RENDER, VIEW_TARGET,
 				() -> PlayerGlowClient.targetEsp, v -> PlayerGlowClient.targetEsp = v));
+		modules.add(new Module("ESP Arrows", "Стрелки вокруг прицела\nуказывают на мобов/игроков", CAT_RENDER, VIEW_ARROW,
+				() -> PlayerGlowClient.espArrows, v -> PlayerGlowClient.espArrows = v));
 		modules.add(new Module("Tracers", "Линии от прицела\nк игрокам", CAT_RENDER, -1,
 				() -> PlayerGlowClient.tracers, v -> PlayerGlowClient.tracers = v));
 		modules.add(new Module("Fast Place", "Очень быстро ставит\nблоки, скорость в настройках", CAT_UTILS, VIEW_FASTPLACE,
@@ -359,9 +361,17 @@ public class PlayerGlowScreen extends Screen {
 					v -> PlayerGlowClient.espColor = UiDraw.hsv((float) v, 0.75f, 1f), "%.0f", true));
 			ss.add(new Slider("Opacity", 10.0, 100.0, 5.0,
 					() -> PlayerGlowClient.espAlpha * 100.0, v -> PlayerGlowClient.espAlpha = (float) (v / 100.0), "%.0f%%", false));
+		} else if (view == VIEW_ARROW) {
+			viewTitle = "ESP Arrows";
+			ts.add(new Toggle("Players", () -> PlayerGlowClient.arrowPlayers, v -> PlayerGlowClient.arrowPlayers = v));
+			ts.add(new Toggle("Mobs", () -> PlayerGlowClient.arrowMobs, v -> PlayerGlowClient.arrowMobs = v));
+			sw = new Swatches(() -> PlayerGlowClient.arrowColor, v -> PlayerGlowClient.arrowColor = v);
+			ss.add(new Slider("Hue", 0.0, 360.0, 1.0, () -> UiDraw.hueOf(PlayerGlowClient.arrowColor),
+					v -> PlayerGlowClient.arrowColor = UiDraw.hsv((float) v, 0.75f, 1f), "%.0f", true));
+			ss.add(new Slider("Opacity", 10.0, 100.0, 5.0, () -> PlayerGlowClient.arrowAlpha * 100.0,
+					v -> PlayerGlowClient.arrowAlpha = (float) (v / 100.0), "%.0f%%", false));
 		} else if (view == VIEW_TARGET) {
 			viewTitle = "Target ESP";
-			ts.add(new Toggle("Crosshair Orbit", () -> PlayerGlowClient.targetCross, v -> PlayerGlowClient.targetCross = v));
 			sw = new Swatches(() -> PlayerGlowClient.targetColor, v -> PlayerGlowClient.targetColor = v);
 			ss.add(new Slider("Hue", 0.0, 360.0, 1.0, () -> UiDraw.hueOf(PlayerGlowClient.targetColor),
 					v -> PlayerGlowClient.targetColor = UiDraw.hsv((float) v, 0.75f, 1f), "%.0f", true));
