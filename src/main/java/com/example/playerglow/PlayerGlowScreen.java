@@ -37,7 +37,8 @@ public class PlayerGlowScreen extends Screen {
 	private static final int CAT_COMBAT = 0, CAT_RENDER = 1, CAT_SETTINGS = 2, CAT_UTILS = 3;
 	private static final int[] CAT_ORDER = { CAT_COMBAT, CAT_RENDER, CAT_UTILS, CAT_SETTINGS };
 	private static final String[] CAT_NAMES = { "Combat", "Render", "Settings", "Utilities" };
-	private static final int VIEW_LIST = -1, VIEW_AIMBOT = 0, VIEW_CRYSTAL = 1, VIEW_ESP = 2, VIEW_HAT = 3, VIEW_ITEM = 4, VIEW_FASTPLACE = 5;
+	private static final int VIEW_LIST = -1, VIEW_AIMBOT = 0, VIEW_CRYSTAL = 1, VIEW_ESP = 2, VIEW_HAT = 3, VIEW_ITEM = 4, VIEW_FASTPLACE = 5, VIEW_SPRINT = 6;
+	private Module listening = null;
 
 	// window position offset (kept while the game is running)
 	static float offX = 0f, offY = 0f;
@@ -212,7 +213,7 @@ public class PlayerGlowScreen extends Screen {
 				() -> PlayerGlowClient.tracers, v -> PlayerGlowClient.tracers = v));
 		modules.add(new Module("Fast Place", "Очень быстро ставит\nблоки, скорость в настройках", CAT_UTILS, VIEW_FASTPLACE,
 				() -> PlayerGlowClient.fastPlace, v -> PlayerGlowClient.fastPlace = v));
-		modules.add(new Module("Auto Sprint", "Всегда бежишь,\nпока идёшь вперёд", CAT_UTILS, -1,
+		modules.add(new Module("Auto Sprint", "Всегда бежишь,\nпока идёшь вперёд", CAT_UTILS, VIEW_SPRINT,
 				() -> PlayerGlowClient.autoSprint, v -> PlayerGlowClient.autoSprint = v));
 		modules.add(new Module("Trajectories", "Линия полёта перла,\nзелий, лука и трезубца", CAT_RENDER, -1,
 				() -> PlayerGlowClient.trajectories, v -> PlayerGlowClient.trajectories = v));
@@ -346,6 +347,9 @@ public class PlayerGlowScreen extends Screen {
 					v -> PlayerGlowClient.espColor = UiDraw.hsv((float) v, 0.75f, 1f), "%.0f", true));
 			ss.add(new Slider("Opacity", 10.0, 100.0, 5.0,
 					() -> PlayerGlowClient.espAlpha * 100.0, v -> PlayerGlowClient.espAlpha = (float) (v / 100.0), "%.0f%%", false));
+		} else if (view == VIEW_SPRINT) {
+			viewTitle = "Auto Sprint";
+			ts.add(new Toggle("Stop sprint on hit", () -> PlayerGlowClient.sprintStopOnHit, v -> PlayerGlowClient.sprintStopOnHit = v));
 		} else if (view == VIEW_FASTPLACE) {
 			viewTitle = "Fast Place";
 			ss.add(new Slider("Delay", 0.0, 4.0, 1.0, () -> PlayerGlowClient.fastPlaceDelay,
@@ -640,6 +644,8 @@ public class PlayerGlowScreen extends Screen {
 				if (m.visible) drawModuleText(ctx, m, cf);
 			}
 			if (!sliders.isEmpty()) drawSettingsText(ctx, cf);
+			String hint = listening != null ? "Нажми клавишу  (Backspace - убрать, Esc - отмена)" : "ПКМ по функции - назначить клавишу";
+			txt(ctx, hint, CX + 2, H - 10.5f, 0.62f, alpha(listening != null ? 0xFFFFD84A : MUTED, 0.85f));
 		} else {
 			drawSettingsText(ctx, cf);
 		}
@@ -696,6 +702,13 @@ public class PlayerGlowScreen extends Screen {
 	private void drawModuleText(DrawContext ctx, Module m, float cf) {
 		int nameCol = lerp(TEXT, WHITE, m.on);
 		txt(ctx, m.name, m.x + 9, m.y + (compact ? 5f : 8f), 0.95f, alpha(nameCol, cf));
+		Integer bk = PlayerGlowClient.binds.get(m.name);
+		if (m == listening || (bk != null && bk > 0)) {
+			String lab = m == listening ? "..." : "[" + PlayerGlowClient.keyLabel(bk) + "]";
+			float lw = tw(lab, 0.72f);
+			txt(ctx, lab, m.x + m.w - 8 - lw, m.y + (compact ? 6f : 9f), 0.72f,
+					alpha(m == listening ? 0xFFFFD84A : lerp(MUTED, 0xFFE6E0FF, m.on), cf));
+		}
 		int dcol = lerp(MUTED, 0xDDFFFFFF, m.on);
 		String[] lines = m.desc.split("\n");
 		for (int i = 0; i < lines.length; i++) {
@@ -806,6 +819,8 @@ public class PlayerGlowScreen extends Screen {
 			return super.mouseClicked(mouseX, mouseY, button);
 		}
 		if (button != 0 && button != 1) return true;
+		Module wasListening = listening;
+		listening = null;
 
 		if (inRect(lmx, lmy, 8, H - 36, SB - 16, 26)) {
 			this.close();
@@ -837,7 +852,12 @@ public class PlayerGlowScreen extends Screen {
 			for (Module m : modules) {
 				if (!m.visible || !m.contains(lmx, lmy)) continue;
 				boolean onGear = m.gearView >= 0 && Math.hypot(lmx - gearX(m), lmy - gearY(m)) <= 9;
-				if ((button == 0 && onGear) || (button == 1 && m.gearView >= 0)) {
+				if (button == 1) {
+					// right click = bind a hotkey to this function
+					if (wasListening != m) listening = m;
+					return true;
+				}
+				if (button == 0 && onGear) {
 					setView(m.gearView);
 					return true;
 				}
@@ -927,6 +947,20 @@ public class PlayerGlowScreen extends Screen {
 
 	@Override
 	public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+		if (listening != null) {
+			if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
+				listening = null;
+			} else if (keyCode == GLFW.GLFW_KEY_BACKSPACE || keyCode == GLFW.GLFW_KEY_DELETE) {
+				PlayerGlowClient.binds.remove(listening.name);
+				listening = null;
+				PlayerGlowClient.saveConfig();
+			} else {
+				PlayerGlowClient.binds.put(listening.name, keyCode);
+				listening = null;
+				PlayerGlowClient.saveConfig();
+			}
+			return true;
+		}
 		if (searchFocus && view == VIEW_LIST) {
 			if (keyCode == GLFW.GLFW_KEY_BACKSPACE) {
 				if (!query.isEmpty()) {
