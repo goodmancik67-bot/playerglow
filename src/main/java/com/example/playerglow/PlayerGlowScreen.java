@@ -37,7 +37,7 @@ public class PlayerGlowScreen extends Screen {
 	private static final int CAT_COMBAT = 0, CAT_RENDER = 1, CAT_SETTINGS = 2, CAT_UTILS = 3;
 	private static final int[] CAT_ORDER = { CAT_COMBAT, CAT_RENDER, CAT_UTILS, CAT_SETTINGS };
 	private static final String[] CAT_NAMES = { "Combat", "Render", "Settings", "Utilities" };
-	private static final int VIEW_LIST = -1, VIEW_AIMBOT = 0, VIEW_CRYSTAL = 1, VIEW_ESP = 2, VIEW_HAT = 3, VIEW_ITEM = 4, VIEW_FASTPLACE = 5, VIEW_SPRINT = 6, VIEW_BLOCK = 7, VIEW_VEL = 8, VIEW_TARGET = 9, VIEW_ARROW = 10;
+	private static final int VIEW_LIST = -1, VIEW_AIMBOT = 0, VIEW_CRYSTAL = 1, VIEW_ESP = 2, VIEW_HAT = 3, VIEW_ITEM = 4, VIEW_FASTPLACE = 5, VIEW_SPRINT = 6, VIEW_BLOCK = 7, VIEW_VEL = 8, VIEW_TARGET = 9, VIEW_ARROW = 10, VIEW_CYCLONE = 11;
 	private boolean tight = false;
 	private Module listening = null;
 
@@ -187,6 +187,8 @@ public class PlayerGlowScreen extends Screen {
 				() -> PlayerGlowClient.autoWeapon, v -> PlayerGlowClient.autoWeapon = v));
 		modules.add(new Module("Auto Block", "Поднимает щит, когда\nрядом враг", CAT_COMBAT, VIEW_BLOCK,
 				() -> PlayerGlowClient.autoBlock, v -> PlayerGlowClient.autoBlock = v));
+		modules.add(new Module("Cyclone Aura", "Бьёт всех врагов рядом\nпо кругу, с кольцом", CAT_COMBAT, VIEW_CYCLONE,
+				() -> PlayerGlowClient.cyclone, v -> PlayerGlowClient.cyclone = v));
 		modules.add(new Module("Velocity", "Уменьшает отбрасывание\nот ударов", CAT_COMBAT, VIEW_VEL,
 				() -> PlayerGlowClient.velocity, v -> PlayerGlowClient.velocity = v));
 		modules.add(new Module("Criticals", "Каждый удар\nстановится критом", CAT_COMBAT, -1,
@@ -361,6 +363,14 @@ public class PlayerGlowScreen extends Screen {
 					v -> PlayerGlowClient.espColor = UiDraw.hsv((float) v, 0.75f, 1f), "%.0f", true));
 			ss.add(new Slider("Opacity", 10.0, 100.0, 5.0,
 					() -> PlayerGlowClient.espAlpha * 100.0, v -> PlayerGlowClient.espAlpha = (float) (v / 100.0), "%.0f%%", false));
+		} else if (view == VIEW_CYCLONE) {
+			viewTitle = "Cyclone Aura";
+			ts.add(new Toggle("Players", () -> PlayerGlowClient.cycPlayers, v -> PlayerGlowClient.cycPlayers = v));
+			ts.add(new Toggle("Mobs", () -> PlayerGlowClient.cycMobs, v -> PlayerGlowClient.cycMobs = v));
+			ts.add(new Toggle("Ring", () -> PlayerGlowClient.cycRing, v -> PlayerGlowClient.cycRing = v));
+			sw = new Swatches(() -> PlayerGlowClient.cycColor, v -> PlayerGlowClient.cycColor = v);
+			ss.add(new Slider("Range", 3.0, 6.0, 0.1, () -> PlayerGlowClient.cycRange,
+					v -> PlayerGlowClient.cycRange = (float) v, "%.1f", false));
 		} else if (view == VIEW_ARROW) {
 			viewTitle = "ESP Arrows";
 			ts.add(new Toggle("Players", () -> PlayerGlowClient.arrowPlayers, v -> PlayerGlowClient.arrowPlayers = v));
