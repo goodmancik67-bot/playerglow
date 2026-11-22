@@ -149,6 +149,14 @@ public class PlayerGlowClient implements ClientModInitializer {
 	public static float velH = 0f;   // % of horizontal knockback that is kept
 	public static float velV = 100f; // % of vertical knockback that is kept
 	public static boolean armorHud = false;
+	public static boolean targetEsp = false;
+	public static boolean targetCross = true;
+	public static int targetColor = 0xFFFFFF;
+	public static float targetAlpha = 1.0f;
+	public static float targetSpeed = 1.2f;
+	private static net.minecraft.entity.LivingEntity teTarget = null;
+	private static float teFade = 0f;
+	private static long teLast = 0L;
 	private static boolean abHolding = false;
 
 	// hotkeys: module name -> GLFW key code
@@ -196,6 +204,7 @@ public class PlayerGlowClient implements ClientModInitializer {
 		TOGGLES.add(new Tg("Auto Block", () -> autoBlock, v -> autoBlock = v));
 		TOGGLES.add(new Tg("Velocity", () -> velocity, v -> velocity = v));
 		TOGGLES.add(new Tg("Armor HUD", () -> armorHud, v -> armorHud = v));
+		TOGGLES.add(new Tg("Target ESP", () -> targetEsp, v -> targetEsp = v));
 	}
 
 	/** Short label for a key shown on the module card. */
@@ -336,6 +345,11 @@ public class PlayerGlowClient implements ClientModInitializer {
 			velH = (float) gd(p, "velH", velH);
 			velV = (float) gd(p, "velV", velV);
 			armorHud = gb(p, "armorHud", armorHud);
+			targetEsp = gb(p, "targetEsp", targetEsp);
+			targetCross = gb(p, "targetCross", targetCross);
+			targetColor = gi(p, "targetColor", targetColor);
+			targetAlpha = (float) gd(p, "targetAlpha", targetAlpha);
+			targetSpeed = (float) gd(p, "targetSpeed", targetSpeed);
 			binds.clear();
 			for (String key : p.stringPropertyNames()) {
 				if (!key.startsWith("bind.")) continue;
@@ -407,6 +421,11 @@ public class PlayerGlowClient implements ClientModInitializer {
 			p.setProperty("velH", String.valueOf(velH));
 			p.setProperty("velV", String.valueOf(velV));
 			p.setProperty("armorHud", String.valueOf(armorHud));
+			p.setProperty("targetEsp", String.valueOf(targetEsp));
+			p.setProperty("targetCross", String.valueOf(targetCross));
+			p.setProperty("targetColor", String.valueOf(targetColor));
+			p.setProperty("targetAlpha", String.valueOf(targetAlpha));
+			p.setProperty("targetSpeed", String.valueOf(targetSpeed));
 			for (java.util.Map.Entry<String, Integer> e : binds.entrySet()) {
 				p.setProperty("bind." + e.getKey().replace(' ', '_'), String.valueOf(e.getValue()));
 			}
@@ -493,6 +512,7 @@ public class PlayerGlowClient implements ClientModInitializer {
 			UiDraw.drawTargetHud(ctx);
 			UiDraw.drawHitMarker(ctx);
 			drawArmorHud(ctx);
+			UiDraw.drawCrosshairOrbit(ctx);
 		});
 
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
@@ -658,6 +678,71 @@ public class PlayerGlowClient implements ClientModInitializer {
 				UiDraw.txt(ctx, mc.textRenderer, t, x + 8 - UiDraw.width(mc.textRenderer, t, 0.7f) / 2f, y + 18, 0.7f, col);
 			}
 		}
+	}
+
+	/** Target ESP: glowing crystals orbiting the mob/player you are aiming at. */
+	private static void drawTargetEsp(MinecraftClient mc, WorldRenderContext ctx, Vec3d cam, Matrix4f m, float td) {
+		long now = System.nanoTime();
+		float dt = teLast == 0L ? 0.016f : Math.min(0.1f, (now - teLast) / 1_000_000_000f);
+		teLast = now;
+
+		// pick the entity closest to the crosshair line
+		Vec3d look = Vec3d.fromPolar(ctx.camera().getPitch(), ctx.camera().getYaw());
+		net.minecraft.entity.LivingEntity best = null;
+		double bestDist = 1e9;
+		for (Entity e : mc.world.getEntities()) {
+			if (!(e instanceof net.minecraft.entity.LivingEntity le) || e == mc.player || !le.isAlive() || e.isSpectator()) continue;
+			Vec3d c = e.getLerpedPos(td).add(0, e.getHeight() * 0.5, 0).subtract(cam);
+			double dist = c.length();
+			if (dist < 0.5 || dist > 40.0) continue;
+			double dot = c.dotProduct(look) / dist;
+			double need = Math.cos(Math.atan2(Math.max(e.getWidth(), e.getHeight()) * 0.5 + 0.25, dist));
+			if (dot >= need && dist < bestDist) {
+				best = le;
+				bestDist = dist;
+			}
+		}
+		if (best != null) teTarget = best;
+		float goal = best != null ? 1f : 0f;
+		teFade += (goal - teFade) * (1f - (float) Math.exp(-dt * 9f));
+		if (teTarget == null || teTarget.isRemoved() || teFade < 0.03f) return;
+
+		net.minecraft.entity.LivingEntity e = teTarget;
+		Vec3d p = e.getLerpedPos(td);
+		float cx = (float) (p.x - cam.x), cy = (float) (p.y - cam.y), cz = (float) (p.z - cam.z);
+		float h = e.getHeight(), baseR = Math.max(0.55f, e.getWidth() * 0.5f + 0.5f);
+		double t = now / 1_000_000_000.0;
+		int rgb = targetColor & 0xFFFFFF;
+		float fade = teFade * targetAlpha;
+		int n = 14;
+		float[][] pos = new float[n][3];
+		float[] ln = new float[n], ang = new float[n], tw = new float[n], spin = new float[n], tilt = new float[n];
+		for (int i = 0; i < n; i++) {
+			ang[i] = (float) (t * targetSpeed * (1.0 + 0.12 * (i % 3)) + i * Math.PI * 2 / n);
+			float rad = baseR * (0.9f + 0.3f * (float) Math.sin(i * 1.7));
+			float frac = (i * 0.6180339f) % 1f;
+			float y = h * (0.02f + 0.98f * frac) + 0.1f * (float) Math.sin(t * 1.5 + i);
+			pos[i][0] = cx + (float) Math.cos(ang[i]) * rad;
+			pos[i][1] = cy + y;
+			pos[i][2] = cz + (float) Math.sin(ang[i]) * rad;
+			ln[i] = 0.10f + 0.06f * (((i * 7) % 5) / 4f);
+			tw[i] = 0.75f + 0.25f * (float) Math.sin(t * 4 + i * 2.1);
+			spin[i] = (float) (t * 2.5 + i);
+			tilt[i] = 0.45f + 0.4f * (float) Math.sin(i * 1.3);
+		}
+		BufferBuilder bb = Tessellator.getInstance().begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
+		for (int i = 0; i < n; i++) { // solid cores first
+			UiDraw.crystal(bb, m, pos[i][0], pos[i][1], pos[i][2], ln[i], ln[i] * 0.42f, spin[i], tilt[i],
+					ang[i] + 1.5708f, rgb, Math.round(255 * fade), true);
+		}
+		for (int i = 0; i < n; i++) { // glow halos
+			UiDraw.crystal(bb, m, pos[i][0], pos[i][1], pos[i][2], ln[i] * 1.5f, ln[i] * 0.7f, spin[i], tilt[i],
+					ang[i] + 1.5708f, rgb, Math.round(255 * fade * 0.20f * tw[i]), false);
+			UiDraw.crystal(bb, m, pos[i][0], pos[i][1], pos[i][2], ln[i] * 2.3f, ln[i] * 1.1f, spin[i], tilt[i],
+					ang[i] + 1.5708f, rgb, Math.round(255 * fade * 0.09f * tw[i]), false);
+		}
+		RenderSystem.enableDepthTest();
+		BufferRenderer.drawWithGlobalProgram(bb.end());
 	}
 
 	private static void tickNightVision(MinecraftClient client) {
@@ -894,7 +979,8 @@ public class PlayerGlowClient implements ClientModInitializer {
 		boolean doItem = itemEsp;
 		boolean doBlock = blockOutline;
 		boolean doTracers = tracers;
-		if (!doBox && !doHat && !doTraj && !doItem && !doBlock && !doTracers) return;
+		boolean doTE = targetEsp;
+		if (!doBox && !doHat && !doTraj && !doItem && !doBlock && !doTracers && !doTE) return;
 		MatrixStack ms = ctx.matrixStack();
 		if (ms == null) return;
 
@@ -948,6 +1034,13 @@ public class PlayerGlowClient implements ClientModInitializer {
 				BufferRenderer.drawWithGlobalProgram(bb.end());
 				RenderSystem.enableDepthTest();
 			}
+		}
+
+		if (doTE) {
+			drawTargetEsp(mc, ctx, cam, m, td);
+		} else {
+			teTarget = null;
+			teFade = 0f;
 		}
 
 		if (doTracers) {
