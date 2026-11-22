@@ -139,6 +139,94 @@ public class PlayerGlowClient implements ClientModInitializer {
 	public static boolean fastPlace = false;
 	public static float fastPlaceDelay = 0f;
 	public static boolean autoSprint = false;
+	public static boolean sprintStopOnHit = true;
+
+	// hotkeys: module name -> GLFW key code
+	public static final java.util.LinkedHashMap<String, Integer> binds = new java.util.LinkedHashMap<>();
+	private static final java.util.HashSet<String> heldBinds = new java.util.HashSet<>();
+
+	private static final class Tg {
+		final String name;
+		final java.util.function.BooleanSupplier get;
+		final java.util.function.Consumer<Boolean> set;
+
+		Tg(String name, java.util.function.BooleanSupplier get, java.util.function.Consumer<Boolean> set) {
+			this.name = name;
+			this.get = get;
+			this.set = set;
+		}
+	}
+
+	private static final java.util.List<Tg> TOGGLES = new java.util.ArrayList<>();
+
+	private static void regToggles() {
+		TOGGLES.add(new Tg("Aimbot", () -> aimbot, v -> aimbot = v));
+		TOGGLES.add(new Tg("CrystalAura", () -> crystalAura, v -> crystalAura = v));
+		TOGGLES.add(new Tg("TriggerBot", () -> triggerbot, v -> triggerbot = v));
+		TOGGLES.add(new Tg("Auto Totem", () -> autoTotem, v -> autoTotem = v));
+		TOGGLES.add(new Tg("Criticals", () -> criticals, v -> criticals = v));
+		TOGGLES.add(new Tg("Auto Shift", () -> autoShift, v -> autoShift = v));
+		TOGGLES.add(new Tg("Player Glow", () -> enabled, v -> enabled = v));
+		TOGGLES.add(new Tg("China Hat", () -> chinaHat, v -> chinaHat = v));
+		TOGGLES.add(new Tg("X-Ray", () -> xray, v -> {
+			xray = v;
+			MinecraftClient.getInstance().worldRenderer.reload();
+		}));
+		TOGGLES.add(new Tg("Target HUD", () -> targetHud, v -> targetHud = v));
+		TOGGLES.add(new Tg("Hit Marker", () -> hitMarker, v -> hitMarker = v));
+		TOGGLES.add(new Tg("Info HUD", () -> infoHud, v -> infoHud = v));
+		TOGGLES.add(new Tg("Glow Hand", () -> swordShimmer, v -> swordShimmer = v));
+		TOGGLES.add(new Tg("Item ESP", () -> itemEsp, v -> itemEsp = v));
+		TOGGLES.add(new Tg("Block Outline", () -> blockOutline, v -> blockOutline = v));
+		TOGGLES.add(new Tg("Tracers", () -> tracers, v -> tracers = v));
+		TOGGLES.add(new Tg("Trajectories", () -> trajectories, v -> trajectories = v));
+		TOGGLES.add(new Tg("Fast Place", () -> fastPlace, v -> fastPlace = v));
+		TOGGLES.add(new Tg("Auto Sprint", () -> autoSprint, v -> autoSprint = v));
+	}
+
+	/** Short label for a key shown on the module card. */
+	public static String keyLabel(int key) {
+		switch (key) {
+			case GLFW.GLFW_KEY_LEFT_SHIFT: return "LShift";
+			case GLFW.GLFW_KEY_RIGHT_SHIFT: return "RShift";
+			case GLFW.GLFW_KEY_LEFT_CONTROL: return "LCtrl";
+			case GLFW.GLFW_KEY_RIGHT_CONTROL: return "RCtrl";
+			case GLFW.GLFW_KEY_LEFT_ALT: return "LAlt";
+			case GLFW.GLFW_KEY_RIGHT_ALT: return "RAlt";
+			case GLFW.GLFW_KEY_SPACE: return "Space";
+			case GLFW.GLFW_KEY_TAB: return "Tab";
+			case GLFW.GLFW_KEY_CAPS_LOCK: return "Caps";
+			default:
+				try {
+					String t = InputUtil.Type.KEYSYM.createFromCode(key).getLocalizedText().getString();
+					return t.length() > 6 ? t.substring(0, 6) : t;
+				} catch (Throwable e) {
+					return "?";
+				}
+		}
+	}
+
+	private static void tickBinds(MinecraftClient c) {
+		if (c.player == null || c.currentScreen != null) {
+			heldBinds.clear();
+			return;
+		}
+		long h = c.getWindow().getHandle();
+		for (Tg t : TOGGLES) {
+			Integer k = binds.get(t.name);
+			if (k == null || k <= 0) continue;
+			boolean down = InputUtil.isKeyPressed(h, k);
+			if (down) {
+				if (heldBinds.add(t.name)) {
+					boolean now = !t.get.getAsBoolean();
+					t.set.accept(now);
+					c.player.sendMessage(net.minecraft.text.Text.literal(t.name + ": " + (now ? "ON" : "OFF")), true);
+				}
+			} else {
+				heldBinds.remove(t.name);
+			}
+		}
+	}
 
 	// block outline animation state (world coordinates)
 	private static double[] boBox = null;
@@ -224,6 +312,15 @@ public class PlayerGlowClient implements ClientModInitializer {
 			autoTotem = gb(p, "autoTotem", autoTotem);
 			fastPlace = gb(p, "fastPlace", fastPlace);
 			fastPlaceDelay = (float) gd(p, "fastPlaceDelay", fastPlaceDelay);
+			sprintStopOnHit = gb(p, "sprintStopOnHit", sprintStopOnHit);
+			binds.clear();
+			for (String key : p.stringPropertyNames()) {
+				if (!key.startsWith("bind.")) continue;
+				try {
+					binds.put(key.substring(5).replace('_', ' '), Integer.parseInt(p.getProperty(key).trim()));
+				} catch (Exception ignored) {
+				}
+			}
 			autoSprint = gb(p, "autoSprint", autoSprint);
 			trajectories = gb(p, "trajectories", trajectories);
 			crystalAutoPlace = gb(p, "crystalAutoPlace", crystalAutoPlace);
@@ -277,6 +374,10 @@ public class PlayerGlowClient implements ClientModInitializer {
 			p.setProperty("autoTotem", String.valueOf(autoTotem));
 			p.setProperty("fastPlace", String.valueOf(fastPlace));
 			p.setProperty("fastPlaceDelay", String.valueOf(fastPlaceDelay));
+			p.setProperty("sprintStopOnHit", String.valueOf(sprintStopOnHit));
+			for (java.util.Map.Entry<String, Integer> e : binds.entrySet()) {
+				p.setProperty("bind." + e.getKey().replace(' ', '_'), String.valueOf(e.getValue()));
+			}
 			p.setProperty("autoSprint", String.valueOf(autoSprint));
 			p.setProperty("trajectories", String.valueOf(trajectories));
 			p.setProperty("crystalAutoPlace", String.valueOf(crystalAutoPlace));
@@ -313,6 +414,7 @@ public class PlayerGlowClient implements ClientModInitializer {
 
 	@Override
 	public void onInitializeClient() {
+		regToggles();
 		loadConfig();
 		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> saveConfig());
 		// hide the vanilla black outline while our own is on
@@ -328,7 +430,18 @@ public class PlayerGlowClient implements ClientModInitializer {
 			if (world.isClient && entity instanceof LivingEntity living) {
 				UiDraw.noteHit(living);
 				if (autoShift) shiftTicks = 4;
-				if (criticals) doCrit(player);
+				if (criticals) {
+					// a crit needs the player to NOT be sprinting: drop sprint right before the hit
+					if (sprintStopOnHit && player.isSprinting()) {
+						player.setSprinting(false);
+						ClientPlayNetworkHandler nh = MinecraftClient.getInstance().getNetworkHandler();
+						if (nh != null) {
+							nh.sendPacket(new net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket(player,
+									net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket.Mode.STOP_SPRINTING));
+						}
+					}
+					doCrit(player);
+				}
 			}
 			return ActionResult.PASS;
 		});
@@ -363,6 +476,7 @@ public class PlayerGlowClient implements ClientModInitializer {
 			tickFastPlace(client);
 			tickAutoSprint(client);
 			tickAutoTotem(client);
+			tickBinds(client);
 		});
 	}
 
