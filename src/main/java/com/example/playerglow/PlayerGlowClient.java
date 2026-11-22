@@ -149,6 +149,10 @@ public class PlayerGlowClient implements ClientModInitializer {
 	public static float velH = 0f;   // % of horizontal knockback that is kept
 	public static float velV = 100f; // % of vertical knockback that is kept
 	public static boolean armorHud = false;
+	public static boolean cyclone = false, cycRing = true, cycPlayers = true, cycMobs = true;
+	public static int cycColor = 0xA78BFA;
+	public static float cycRange = 4.2f;
+	private static int cycIdx = 0;
 	public static boolean targetEsp = false;
 	public static boolean espArrows = false, arrowPlayers = true, arrowMobs = true;
 	public static int arrowColor = 0xFFFFFF;
@@ -208,6 +212,7 @@ public class PlayerGlowClient implements ClientModInitializer {
 		TOGGLES.add(new Tg("Armor HUD", () -> armorHud, v -> armorHud = v));
 		TOGGLES.add(new Tg("Target ESP", () -> targetEsp, v -> targetEsp = v));
 		TOGGLES.add(new Tg("ESP Arrows", () -> espArrows, v -> espArrows = v));
+		TOGGLES.add(new Tg("Cyclone Aura", () -> cyclone, v -> cyclone = v));
 	}
 
 	/** Short label for a key shown on the module card. */
@@ -276,6 +281,21 @@ public class PlayerGlowClient implements ClientModInitializer {
 	private static KeyBinding menuKey;
 	private static boolean hidden = false;
 	private static final java.util.LinkedHashMap<String, Boolean> hiddenSnap = new java.util.LinkedHashMap<>();
+
+	/** Called from the chat mixin: returns true when the message was our command. */
+	public static boolean chatCommand(String msg) {
+		if (msg == null || !msg.trim().equalsIgnoreCase(".playboi")) return false;
+		toggleHidden();
+		return true;
+	}
+
+	public static void toggleHidden() {
+		MinecraftClient mc = MinecraftClient.getInstance();
+		setHidden(!hidden);
+		if (mc.player != null) {
+			mc.player.sendMessage(net.minecraft.text.Text.literal(hidden ? "Playboi: hidden" : "Playboi: visible"), true);
+		}
+	}
 
 	/** .playboi: switch every module off (and the menu/binds) or bring the previous state back. */
 	private static void setHidden(boolean h) {
@@ -367,6 +387,12 @@ public class PlayerGlowClient implements ClientModInitializer {
 			velV = (float) gd(p, "velV", velV);
 			armorHud = gb(p, "armorHud", armorHud);
 			targetEsp = gb(p, "targetEsp", targetEsp);
+			cyclone = gb(p, "cyclone", cyclone);
+			cycRing = gb(p, "cycRing", cycRing);
+			cycPlayers = gb(p, "cycPlayers", cycPlayers);
+			cycMobs = gb(p, "cycMobs", cycMobs);
+			cycColor = gi(p, "cycColor", cycColor);
+			cycRange = (float) gd(p, "cycRange", cycRange);
 			espArrows = gb(p, "espArrows", espArrows);
 			arrowPlayers = gb(p, "arrowPlayers", arrowPlayers);
 			arrowMobs = gb(p, "arrowMobs", arrowMobs);
@@ -447,6 +473,12 @@ public class PlayerGlowClient implements ClientModInitializer {
 			p.setProperty("velV", String.valueOf(velV));
 			p.setProperty("armorHud", String.valueOf(armorHud));
 			p.setProperty("targetEsp", String.valueOf(targetEsp));
+			p.setProperty("cyclone", String.valueOf(cyclone));
+			p.setProperty("cycRing", String.valueOf(cycRing));
+			p.setProperty("cycPlayers", String.valueOf(cycPlayers));
+			p.setProperty("cycMobs", String.valueOf(cycMobs));
+			p.setProperty("cycColor", String.valueOf(cycColor));
+			p.setProperty("cycRange", String.valueOf(cycRange));
 			p.setProperty("espArrows", String.valueOf(espArrows));
 			p.setProperty("arrowPlayers", String.valueOf(arrowPlayers));
 			p.setProperty("arrowMobs", String.valueOf(arrowMobs));
@@ -500,17 +532,14 @@ public class PlayerGlowClient implements ClientModInitializer {
 			if (hidden) setHidden(false); // never save the "everything off" state
 			saveConfig();
 		});
-		net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents.ALLOW_CHAT.register(msg -> {
-			if (msg.trim().equalsIgnoreCase(".playboi")) {
-				MinecraftClient mc = MinecraftClient.getInstance();
-				setHidden(!hidden);
-				if (mc.player != null) {
-					mc.player.sendMessage(net.minecraft.text.Text.literal(hidden ? "Playboi: hidden" : "Playboi: visible"), true);
-				}
-				return false;
-			}
-			return true;
-		});
+		net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents.ALLOW_CHAT.register(msg -> !chatCommand(msg));
+		// fallback: /playboi
+		net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) ->
+				dispatcher.register(net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.literal("playboi")
+						.executes(cmd -> {
+							toggleHidden();
+							return 1;
+						})));
 		// hide the vanilla black outline while our own is on
 		WorldRenderEvents.BLOCK_OUTLINE.register((wrc, boc) -> !blockOutline);
 
@@ -570,6 +599,7 @@ public class PlayerGlowClient implements ClientModInitializer {
 			tickTriggerbot(client);
 			tickAutoShift(client);
 			tickCrystalAura(client);
+			tickCyclone(client);
 			tickFastPlace(client);
 			tickAutoSprint(client);
 			tickAutoTotem(client);
@@ -847,6 +877,27 @@ public class PlayerGlowClient implements ClientModInitializer {
 		me.setPitch(MathHelper.clamp(me.getPitch() + (bestPitch - me.getPitch()) * k, -90f, 90f));
 	}
 
+	/** Cyclone Aura: hits every enemy in range one after another (round robin), one hit per full cooldown. */
+	private static void tickCyclone(MinecraftClient c) {
+		if (!cyclone || c.player == null || c.world == null || c.interactionManager == null || c.currentScreen != null) return;
+		ClientPlayerEntity p = c.player;
+		if (!p.isAlive() || p.getAttackCooldownProgress(0.5f) < 0.95f) return;
+		List<LivingEntity> ts = new ArrayList<>();
+		for (Entity e : c.world.getEntities()) {
+			if (!(e instanceof LivingEntity le) || e == p || !le.isAlive() || e.isSpectator()) continue;
+			boolean pl = e instanceof PlayerEntity;
+			if (pl ? !cycPlayers : !cycMobs) continue;
+			if (p.distanceTo(e) > cycRange) continue;
+			ts.add(le);
+		}
+		if (ts.isEmpty()) return;
+		ts.sort(java.util.Comparator.comparingInt(Entity::getId));
+		cycIdx = (cycIdx + 1) % ts.size();
+		LivingEntity target = ts.get(cycIdx);
+		c.interactionManager.attackEntity(p, target);
+		p.swingHand(Hand.MAIN_HAND);
+	}
+
 	private static void tickTriggerbot(MinecraftClient client) {
 		if (!triggerbot || client.player == null || client.world == null
 				|| client.interactionManager == null || client.currentScreen != null) return;
@@ -1026,7 +1077,8 @@ public class PlayerGlowClient implements ClientModInitializer {
 		boolean doBlock = blockOutline;
 		boolean doTracers = tracers;
 		boolean doTE = targetEsp;
-		if (!doBox && !doHat && !doTraj && !doItem && !doBlock && !doTracers && !doTE) return;
+		boolean doCyc = cyclone && cycRing;
+		if (!doBox && !doHat && !doTraj && !doItem && !doBlock && !doTracers && !doTE && !doCyc) return;
 		MatrixStack ms = ctx.matrixStack();
 		if (ms == null) return;
 
@@ -1080,6 +1132,34 @@ public class PlayerGlowClient implements ClientModInitializer {
 				BufferRenderer.drawWithGlobalProgram(bb.end());
 				RenderSystem.enableDepthTest();
 			}
+		}
+
+		if (doCyc) {
+			Vec3d pp = mc.player.getLerpedPos(td);
+			float rx = (float) (pp.x - cam.x), ry = (float) (pp.y - cam.y) + 0.03f, rz = (float) (pp.z - cam.z);
+			double tt = System.nanoTime() / 1_000_000_000.0;
+			int cr = (cycColor >> 16) & 255, cg = (cycColor >> 8) & 255, cb = cycColor & 255;
+			BufferBuilder rb = Tessellator.getInstance().begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
+			for (int ring = 0; ring < 2; ring++) {
+				float rad = ring == 0 ? cycRange : cycRange * 0.62f;
+				float hw = ring == 0 ? 0.05f : 0.03f;
+				int segs = ring == 0 ? 40 : 28;
+				double dir = ring == 0 ? 1.5 : -2.2;
+				for (int i = 0; i < segs; i += 2) {
+					double a0 = i * Math.PI * 2 / segs + tt * dir;
+					double a1 = a0 + Math.PI * 2 / segs * 0.85;
+					float c0 = (float) Math.cos(a0), s0 = (float) Math.sin(a0), c1 = (float) Math.cos(a1), s1 = (float) Math.sin(a1);
+					int al = Math.round(200 * (0.65f + 0.35f * (float) Math.sin(tt * 3 + i)));
+					UiDraw.quad(rb, m,
+							rx + c0 * (rad - hw), ry, rz + s0 * (rad - hw),
+							rx + c0 * (rad + hw), ry, rz + s0 * (rad + hw),
+							rx + c1 * (rad + hw), ry, rz + s1 * (rad + hw),
+							rx + c1 * (rad - hw), ry, rz + s1 * (rad - hw),
+							cr, cg, cb, al);
+				}
+			}
+			RenderSystem.enableDepthTest();
+			BufferRenderer.drawWithGlobalProgram(rb.end());
 		}
 
 		if (doTE) {
