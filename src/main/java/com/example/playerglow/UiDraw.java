@@ -455,26 +455,43 @@ public final class UiDraw {
 		}
 	}
 
-	/** Glowing petals orbiting the crosshair (Target ESP). */
-	public static void drawCrosshairOrbit(DrawContext c) {
-		if (!PlayerGlowClient.targetEsp || !PlayerGlowClient.targetCross) return;
+	/** ESP Arrows: small glowing petals around the crosshair pointing toward players/mobs. */
+	public static void drawEspArrows(DrawContext c) {
+		if (!PlayerGlowClient.espArrows) return;
+		MinecraftClient mc = MinecraftClient.getInstance();
+		if (mc.player == null || mc.world == null || mc.options.hudHidden) return;
 		float cx = c.getScaledWindowWidth() / 2f, cy = c.getScaledWindowHeight() / 2f;
+		int rgb = PlayerGlowClient.arrowColor & 0xFFFFFF;
+		float al = PlayerGlowClient.arrowAlpha;
+		float pyaw = mc.player.getYaw();
+		double px = mc.player.getX(), pz = mc.player.getZ();
 		double t = System.nanoTime() / 1_000_000_000.0;
-		float spd = PlayerGlowClient.targetSpeed;
-		int rgb = PlayerGlowClient.targetColor & 0xFFFFFF;
-		float al = PlayerGlowClient.targetAlpha;
-		int n = 7;
 		Gfx.begin(c, 1f);
-		for (int i = 0; i < n; i++) {
-			float ang = (float) (t * spd * 1.1 + i * Math.PI * 2 / n);
-			float rad = 13f + 3.2f * (float) Math.sin(t * 1.8 + i * 1.9);
-			float px = cx + (float) Math.cos(ang) * rad, py = cy + (float) Math.sin(ang) * rad;
-			float tw = 0.7f + 0.3f * (float) Math.sin(t * 4 + i * 2.3);
-			float dx = (float) Math.cos(ang + Math.PI / 2), dy = (float) Math.sin(ang + Math.PI / 2);
-			Gfx.circle(px, py, 6.5f, alpha(0xFF000000 | rgb, 0.10f * al * tw));
-			Gfx.circle(px, py, 4.2f, alpha(0xFF000000 | rgb, 0.18f * al * tw));
-			Gfx.line(px - dx * 2.4f, py - dy * 2.4f, px + dx * 2.4f, py + dy * 2.4f, 3.0f, alpha(0xFF000000 | rgb, 0.95f * al * tw));
-			Gfx.circle(px, py, 1.3f, alpha(0xFFFFFFFF, 0.9f * al * tw));
+		int shown = 0;
+		for (net.minecraft.entity.Entity e : mc.world.getEntities()) {
+			if (shown >= 24) break;
+			if (!(e instanceof LivingEntity) || e == mc.player || !e.isAlive() || e.isSpectator()) continue;
+			boolean pl = e instanceof net.minecraft.entity.player.PlayerEntity;
+			if (pl ? !PlayerGlowClient.arrowPlayers : !PlayerGlowClient.arrowMobs) continue;
+			double dx = e.getX() - px, dz = e.getZ() - pz;
+			double dist = Math.sqrt(dx * dx + dz * dz);
+			if (dist < 1.0 || dist > 64.0) continue;
+			double ey = Math.toDegrees(Math.atan2(dz, dx)) - 90.0;
+			double rel = Math.toRadians(net.minecraft.util.math.MathHelper.wrapDegrees(ey - pyaw));
+			float ux = (float) Math.sin(rel), uy = (float) -Math.cos(rel);
+			float rad = 26f + 2f * (float) Math.sin(t * 2.2 + shown);
+			float bx = cx + ux * rad, by = cy + uy * rad;
+			float near = (float) Math.max(0.55, 1.0 - dist / 80.0);
+			float a = al * near;
+			Gfx.circle(bx + ux * 2f, by + uy * 2f, 7f, alpha(0xFF000000 | rgb, 0.10f * a));
+			Gfx.circle(bx + ux * 2f, by + uy * 2f, 4.8f, alpha(0xFF000000 | rgb, 0.18f * a));
+			float[] rr = { 3.0f, 2.7f, 2.2f, 1.6f, 0.9f };
+			for (int k = 0; k < rr.length; k++) {
+				float d = k * 1.5f;
+				Gfx.circle(bx + ux * d, by + uy * d, rr[k], alpha(0xFF000000 | rgb, 0.95f * a));
+			}
+			Gfx.circle(bx, by, 1.2f, alpha(0xFFFFFFFF, 0.9f * a));
+			shown++;
 		}
 		Gfx.end();
 	}
