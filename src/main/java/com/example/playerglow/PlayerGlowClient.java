@@ -140,6 +140,16 @@ public class PlayerGlowClient implements ClientModInitializer {
 	public static float fastPlaceDelay = 0f;
 	public static boolean autoSprint = false;
 	public static boolean sprintStopOnHit = true;
+	public static boolean autoWeapon = false;
+	public static boolean autoBlock = false;
+	public static float abRange = 4.0f;
+	public static boolean abPlayers = true;
+	public static boolean abMobs = true;
+	public static boolean velocity = false;
+	public static float velH = 0f;   // % of horizontal knockback that is kept
+	public static float velV = 100f; // % of vertical knockback that is kept
+	public static boolean armorHud = false;
+	private static boolean abHolding = false;
 
 	// hotkeys: module name -> GLFW key code
 	public static final java.util.LinkedHashMap<String, Integer> binds = new java.util.LinkedHashMap<>();
@@ -182,6 +192,10 @@ public class PlayerGlowClient implements ClientModInitializer {
 		TOGGLES.add(new Tg("Trajectories", () -> trajectories, v -> trajectories = v));
 		TOGGLES.add(new Tg("Fast Place", () -> fastPlace, v -> fastPlace = v));
 		TOGGLES.add(new Tg("Auto Sprint", () -> autoSprint, v -> autoSprint = v));
+		TOGGLES.add(new Tg("Auto Weapon", () -> autoWeapon, v -> autoWeapon = v));
+		TOGGLES.add(new Tg("Auto Block", () -> autoBlock, v -> autoBlock = v));
+		TOGGLES.add(new Tg("Velocity", () -> velocity, v -> velocity = v));
+		TOGGLES.add(new Tg("Armor HUD", () -> armorHud, v -> armorHud = v));
 	}
 
 	/** Short label for a key shown on the module card. */
@@ -313,6 +327,15 @@ public class PlayerGlowClient implements ClientModInitializer {
 			fastPlace = gb(p, "fastPlace", fastPlace);
 			fastPlaceDelay = (float) gd(p, "fastPlaceDelay", fastPlaceDelay);
 			sprintStopOnHit = gb(p, "sprintStopOnHit", sprintStopOnHit);
+			autoWeapon = gb(p, "autoWeapon", autoWeapon);
+			autoBlock = gb(p, "autoBlock", autoBlock);
+			abRange = (float) gd(p, "abRange", abRange);
+			abPlayers = gb(p, "abPlayers", abPlayers);
+			abMobs = gb(p, "abMobs", abMobs);
+			velocity = gb(p, "velocity", velocity);
+			velH = (float) gd(p, "velH", velH);
+			velV = (float) gd(p, "velV", velV);
+			armorHud = gb(p, "armorHud", armorHud);
 			binds.clear();
 			for (String key : p.stringPropertyNames()) {
 				if (!key.startsWith("bind.")) continue;
@@ -375,6 +398,15 @@ public class PlayerGlowClient implements ClientModInitializer {
 			p.setProperty("fastPlace", String.valueOf(fastPlace));
 			p.setProperty("fastPlaceDelay", String.valueOf(fastPlaceDelay));
 			p.setProperty("sprintStopOnHit", String.valueOf(sprintStopOnHit));
+			p.setProperty("autoWeapon", String.valueOf(autoWeapon));
+			p.setProperty("autoBlock", String.valueOf(autoBlock));
+			p.setProperty("abRange", String.valueOf(abRange));
+			p.setProperty("abPlayers", String.valueOf(abPlayers));
+			p.setProperty("abMobs", String.valueOf(abMobs));
+			p.setProperty("velocity", String.valueOf(velocity));
+			p.setProperty("velH", String.valueOf(velH));
+			p.setProperty("velV", String.valueOf(velV));
+			p.setProperty("armorHud", String.valueOf(armorHud));
 			for (java.util.Map.Entry<String, Integer> e : binds.entrySet()) {
 				p.setProperty("bind." + e.getKey().replace(' ', '_'), String.valueOf(e.getValue()));
 			}
@@ -460,6 +492,7 @@ public class PlayerGlowClient implements ClientModInitializer {
 			UiDraw.drawInfoHud(ctx);
 			UiDraw.drawTargetHud(ctx);
 			UiDraw.drawHitMarker(ctx);
+			drawArmorHud(ctx);
 		});
 
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
@@ -476,6 +509,8 @@ public class PlayerGlowClient implements ClientModInitializer {
 			tickFastPlace(client);
 			tickAutoSprint(client);
 			tickAutoTotem(client);
+			tickAutoWeapon(client);
+			tickAutoBlock(client);
 			tickBinds(client);
 		});
 	}
@@ -533,6 +568,94 @@ public class PlayerGlowClient implements ClientModInitializer {
 						net.minecraft.screen.slot.SlotActionType.SWAP, p);
 				totemCd = 6;
 				return;
+			}
+		}
+	}
+
+	// ---------- Auto Weapon / Auto Block / Armor HUD ----------
+
+	private static int weaponScore(ItemStack st) {
+		if (st == null || st.isEmpty()) return 0;
+		String path = Registries.ITEM.getId(st.getItem()).getPath();
+		int tier = path.startsWith("netherite") ? 6 : path.startsWith("diamond") ? 5 : path.startsWith("iron") ? 4
+				: path.startsWith("stone") ? 3 : path.startsWith("golden") ? 2 : 1;
+		if (path.endsWith("_sword")) return 100 + tier;
+		if (path.endsWith("_axe")) return 50 + tier;
+		return 0;
+	}
+
+	/** Auto Weapon: when you look at a mob/player, the best sword (or axe) in the hotbar is selected. */
+	private static void tickAutoWeapon(MinecraftClient c) {
+		ClientPlayerEntity p = c.player;
+		if (!autoWeapon || p == null || c.currentScreen != null) return;
+		if (!(c.crosshairTarget instanceof EntityHitResult ehr) || !(ehr.getEntity() instanceof LivingEntity)) return;
+		int best = weaponScore(p.getMainHandStack());
+		int slot = -1;
+		for (int i = 0; i < 9; i++) {
+			int sc = weaponScore(p.getInventory().getStack(i));
+			if (sc > best) {
+				best = sc;
+				slot = i;
+			}
+		}
+		if (slot >= 0) p.getInventory().setSelectedSlot(slot);
+	}
+
+	/** Auto Block: raises the shield while an enemy is close. */
+	private static void tickAutoBlock(MinecraftClient c) {
+		ClientPlayerEntity p = c.player;
+		if (!autoBlock || p == null || c.world == null || c.currentScreen != null) {
+			if (abHolding) {
+				c.options.useKey.setPressed(false);
+				abHolding = false;
+			}
+			return;
+		}
+		ItemStack main = p.getMainHandStack(), off = p.getOffHandStack();
+		boolean shieldMain = main.isOf(Items.SHIELD);
+		String k = glowKind(main);
+		boolean onBlock = c.crosshairTarget instanceof BlockHitResult;
+		boolean mainHarmless = main.isEmpty() || (k != null && ("sword".equals(k) || "pickaxe".equals(k) || !onBlock));
+		boolean want = false;
+		if (shieldMain || (off.isOf(Items.SHIELD) && mainHarmless)) {
+			double r2 = (double) abRange * abRange;
+			for (Entity e : c.world.getEntities()) {
+				if (e == p || !(e instanceof LivingEntity le) || !le.isAlive() || e.isSpectator()) continue;
+				boolean ok = (abPlayers && e instanceof PlayerEntity) || (abMobs && e instanceof net.minecraft.entity.mob.HostileEntity);
+				if (ok && p.squaredDistanceTo(e) <= r2) {
+					want = true;
+					break;
+				}
+			}
+		}
+		if (want && (!p.isUsingItem() || abHolding)) {
+			c.options.useKey.setPressed(true);
+			abHolding = true;
+		} else if (abHolding) {
+			c.options.useKey.setPressed(false);
+			abHolding = false;
+		}
+	}
+
+	private static void drawArmorHud(net.minecraft.client.gui.DrawContext ctx) {
+		MinecraftClient mc = MinecraftClient.getInstance();
+		if (!armorHud || mc.player == null || mc.options.hudHidden) return;
+		net.minecraft.entity.EquipmentSlot[] slots = { net.minecraft.entity.EquipmentSlot.HEAD,
+				net.minecraft.entity.EquipmentSlot.CHEST, net.minecraft.entity.EquipmentSlot.LEGS,
+				net.minecraft.entity.EquipmentSlot.FEET };
+		int w = ctx.getScaledWindowWidth(), h = ctx.getScaledWindowHeight();
+		int x0 = w - 4 * 22 - 6, y = h - 44;
+		for (int i = 0; i < 4; i++) {
+			ItemStack st = mc.player.getEquippedStack(slots[i]);
+			if (st.isEmpty()) continue;
+			int x = x0 + i * 22;
+			ctx.drawItem(st, x, y);
+			ctx.drawStackOverlay(mc.textRenderer, st, x, y);
+			if (st.isDamageable() && st.getMaxDamage() > 0) {
+				int pct = Math.round((st.getMaxDamage() - st.getDamage()) * 100f / st.getMaxDamage());
+				String t = pct + "%";
+				int col = 0xFF000000 | UiDraw.hsv(Math.max(0, Math.min(100, pct)) * 1.2f, 0.8f, 1f);
+				UiDraw.txt(ctx, mc.textRenderer, t, x + 8 - UiDraw.width(mc.textRenderer, t, 0.7f) / 2f, y + 18, 0.7f, col);
 			}
 		}
 	}
