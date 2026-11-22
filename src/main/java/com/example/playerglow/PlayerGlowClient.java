@@ -233,7 +233,7 @@ public class PlayerGlowClient implements ClientModInitializer {
 	}
 
 	private static void tickBinds(MinecraftClient c) {
-		if (c.player == null || c.currentScreen != null) {
+		if (c.player == null || c.currentScreen != null || hidden) {
 			heldBinds.clear();
 			return;
 		}
@@ -274,6 +274,24 @@ public class PlayerGlowClient implements ClientModInitializer {
 	public static float aimSmooth = 6f;
 
 	private static KeyBinding menuKey;
+	private static boolean hidden = false;
+	private static final java.util.LinkedHashMap<String, Boolean> hiddenSnap = new java.util.LinkedHashMap<>();
+
+	/** .playboi: switch every module off (and the menu/binds) or bring the previous state back. */
+	private static void setHidden(boolean h) {
+		if (h == hidden) return;
+		if (h) {
+			hiddenSnap.clear();
+			for (Tg t : TOGGLES) hiddenSnap.put(t.name, t.get.getAsBoolean());
+			for (Tg t : TOGGLES) t.set.accept(false);
+		} else {
+			for (Tg t : TOGGLES) {
+				Boolean v = hiddenSnap.get(t.name);
+				if (v != null) t.set.accept(v);
+			}
+		}
+		hidden = h;
+	}
 	private static boolean nightVisionApplied = false;
 	private static int shiftTicks = 0;
 	private static boolean shiftForced = false;
@@ -478,7 +496,21 @@ public class PlayerGlowClient implements ClientModInitializer {
 	public void onInitializeClient() {
 		regToggles();
 		loadConfig();
-		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> saveConfig());
+		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
+			if (hidden) setHidden(false); // never save the "everything off" state
+			saveConfig();
+		});
+		net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents.ALLOW_CHAT.register(msg -> {
+			if (msg.trim().equalsIgnoreCase(".playboi")) {
+				MinecraftClient mc = MinecraftClient.getInstance();
+				setHidden(!hidden);
+				if (mc.player != null) {
+					mc.player.sendMessage(net.minecraft.text.Text.literal(hidden ? "Playboi: hidden" : "Playboi: visible"), true);
+				}
+				return false;
+			}
+			return true;
+		});
 		// hide the vanilla black outline while our own is on
 		WorldRenderEvents.BLOCK_OUTLINE.register((wrc, boc) -> !blockOutline);
 
@@ -519,6 +551,7 @@ public class PlayerGlowClient implements ClientModInitializer {
 
 		WorldRenderEvents.AFTER_TRANSLUCENT.register(PlayerGlowClient::renderWorld);
 		HudRenderCallback.EVENT.register((ctx, tickCounter) -> {
+			if (hidden) return;
 			UiDraw.drawInfoHud(ctx);
 			UiDraw.drawTargetHud(ctx);
 			UiDraw.drawHitMarker(ctx);
@@ -528,7 +561,7 @@ public class PlayerGlowClient implements ClientModInitializer {
 
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
 			while (menuKey.wasPressed()) {
-				if (client.currentScreen == null) {
+				if (client.currentScreen == null && !hidden) {
 					client.setScreen(new PlayerGlowScreen());
 				}
 			}
@@ -725,21 +758,23 @@ public class PlayerGlowClient implements ClientModInitializer {
 		double t = now / 1_000_000_000.0;
 		int rgb = targetColor & 0xFFFFFF;
 		float fade = teFade * targetAlpha;
-		int n = 14;
+		int n = 12;
 		float[][] pos = new float[n][3];
 		float[] ln = new float[n], ang = new float[n], tw = new float[n], spin = new float[n], tilt = new float[n];
+		float twv = 0.85f + 0.15f * (float) Math.sin(t * 4);
+		float spinV = (float) (t * 2.5);
 		for (int i = 0; i < n; i++) {
-			ang[i] = (float) (t * targetSpeed * (1.0 + 0.12 * (i % 3)) + i * Math.PI * 2 / n);
-			float rad = baseR * (0.9f + 0.3f * (float) Math.sin(i * 1.7));
-			float frac = (i * 0.6180339f) % 1f;
-			float y = h * (0.02f + 0.98f * frac) + 0.1f * (float) Math.sin(t * 1.5 + i);
-			pos[i][0] = cx + (float) Math.cos(ang[i]) * rad;
+			// perfectly even ring; two alternating layers (low / high), identical size and tilt
+			ang[i] = (float) (t * targetSpeed + i * Math.PI * 2 / n);
+			boolean hi = (i & 1) == 1;
+			float y = h * (hi ? 0.70f : 0.32f) + 0.06f * (float) Math.sin(t * 1.5 + (hi ? Math.PI : 0.0));
+			pos[i][0] = cx + (float) Math.cos(ang[i]) * baseR;
 			pos[i][1] = cy + y;
-			pos[i][2] = cz + (float) Math.sin(ang[i]) * rad;
-			ln[i] = 0.10f + 0.06f * (((i * 7) % 5) / 4f);
-			tw[i] = 0.75f + 0.25f * (float) Math.sin(t * 4 + i * 2.1);
-			spin[i] = (float) (t * 2.5 + i);
-			tilt[i] = 0.45f + 0.4f * (float) Math.sin(i * 1.3);
+			pos[i][2] = cz + (float) Math.sin(ang[i]) * baseR;
+			ln[i] = 0.14f;
+			tw[i] = twv;
+			spin[i] = spinV;
+			tilt[i] = 0.0f;
 		}
 		BufferBuilder bb = Tessellator.getInstance().begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
 		for (int i = 0; i < n; i++) { // solid cores first
@@ -1107,21 +1142,16 @@ public class PlayerGlowClient implements ClientModInitializer {
 			List<Vec3d> pts = new ArrayList<>();
 			int kind = simulateThrow(mc, td, pts);
 			if (kind != 0 && pts.size() > 1) {
-				int rgb = kind == 1 ? 0xC4B5FD : kind == 2 ? 0xF9A8D4 : kind == 3 ? 0x93C5FD : 0x67E8F9;
+				int rgb = kind == 1 ? 0xCDBFFF : kind == 2 ? 0xF9A8D4 : kind == 3 ? 0x93C5FD : 0x67E8F9;
 				BufferBuilder bb = Tessellator.getInstance().begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
 				int n = pts.size();
 				for (int i = 0; i < n - 1; i++) {
 					Vec3d a = pts.get(i).subtract(cam);
 					Vec3d b = pts.get(i + 1).subtract(cam);
-					int alpha = Math.round(230f * (1f - 0.55f * i / n));
-					float w = (float) Math.max(0.006, Math.min(0.05, a.add(b).multiply(0.5).length() * 0.0032));
-					ribbon(bb, m, a, b, w, rgb, alpha);
+					// thin, constant on-screen width line
+					float w = (float) Math.max(0.0025, Math.min(0.02, a.add(b).multiply(0.5).length() * 0.0011));
+					ribbon(bb, m, a, b, w, rgb, 235);
 				}
-				Vec3d end = pts.get(n - 1).subtract(cam);
-				float ex = (float) end.x, ey = (float) end.y, ez = (float) end.z;
-				int r = (rgb >> 16) & 255, g = (rgb >> 8) & 255, bl = rgb & 255;
-				UiDraw.cuboid(bb, m, ex - 0.035f, ey - 0.035f, ez - 0.035f, ex + 0.035f, ey + 0.035f, ez + 0.035f, r, g, bl, 255);
-				UiDraw.cuboid(bb, m, ex - 0.1f, ey - 0.1f, ez - 0.1f, ex + 0.1f, ey + 0.1f, ez + 0.1f, r, g, bl, 55);
 				RenderSystem.enableDepthTest();
 				BufferRenderer.drawWithGlobalProgram(bb.end());
 			}
