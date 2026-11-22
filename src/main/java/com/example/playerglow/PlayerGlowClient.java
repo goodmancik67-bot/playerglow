@@ -150,7 +150,9 @@ public class PlayerGlowClient implements ClientModInitializer {
 	public static float velV = 100f; // % of vertical knockback that is kept
 	public static boolean armorHud = false;
 	public static boolean targetEsp = false;
-	public static boolean targetCross = true;
+	public static boolean espArrows = false, arrowPlayers = true, arrowMobs = true;
+	public static int arrowColor = 0xFFFFFF;
+	public static float arrowAlpha = 1.0f;
 	public static int targetColor = 0xFFFFFF;
 	public static float targetAlpha = 1.0f;
 	public static float targetSpeed = 1.2f;
@@ -205,6 +207,7 @@ public class PlayerGlowClient implements ClientModInitializer {
 		TOGGLES.add(new Tg("Velocity", () -> velocity, v -> velocity = v));
 		TOGGLES.add(new Tg("Armor HUD", () -> armorHud, v -> armorHud = v));
 		TOGGLES.add(new Tg("Target ESP", () -> targetEsp, v -> targetEsp = v));
+		TOGGLES.add(new Tg("ESP Arrows", () -> espArrows, v -> espArrows = v));
 	}
 
 	/** Short label for a key shown on the module card. */
@@ -346,7 +349,11 @@ public class PlayerGlowClient implements ClientModInitializer {
 			velV = (float) gd(p, "velV", velV);
 			armorHud = gb(p, "armorHud", armorHud);
 			targetEsp = gb(p, "targetEsp", targetEsp);
-			targetCross = gb(p, "targetCross", targetCross);
+			espArrows = gb(p, "espArrows", espArrows);
+			arrowPlayers = gb(p, "arrowPlayers", arrowPlayers);
+			arrowMobs = gb(p, "arrowMobs", arrowMobs);
+			arrowColor = gi(p, "arrowColor", arrowColor);
+			arrowAlpha = (float) gd(p, "arrowAlpha", arrowAlpha);
 			targetColor = gi(p, "targetColor", targetColor);
 			targetAlpha = (float) gd(p, "targetAlpha", targetAlpha);
 			targetSpeed = (float) gd(p, "targetSpeed", targetSpeed);
@@ -422,7 +429,11 @@ public class PlayerGlowClient implements ClientModInitializer {
 			p.setProperty("velV", String.valueOf(velV));
 			p.setProperty("armorHud", String.valueOf(armorHud));
 			p.setProperty("targetEsp", String.valueOf(targetEsp));
-			p.setProperty("targetCross", String.valueOf(targetCross));
+			p.setProperty("espArrows", String.valueOf(espArrows));
+			p.setProperty("arrowPlayers", String.valueOf(arrowPlayers));
+			p.setProperty("arrowMobs", String.valueOf(arrowMobs));
+			p.setProperty("arrowColor", String.valueOf(arrowColor));
+			p.setProperty("arrowAlpha", String.valueOf(arrowAlpha));
 			p.setProperty("targetColor", String.valueOf(targetColor));
 			p.setProperty("targetAlpha", String.valueOf(targetAlpha));
 			p.setProperty("targetSpeed", String.valueOf(targetSpeed));
@@ -512,7 +523,7 @@ public class PlayerGlowClient implements ClientModInitializer {
 			UiDraw.drawTargetHud(ctx);
 			UiDraw.drawHitMarker(ctx);
 			drawArmorHud(ctx);
-			UiDraw.drawCrosshairOrbit(ctx);
+			UiDraw.drawEspArrows(ctx);
 		});
 
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
