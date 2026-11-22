@@ -13,6 +13,12 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 /** Velocity: keeps only a part of the knockback sent by the server. */
 @Mixin(ClientPlayNetworkHandler.class)
 public abstract class ClientPlayNetworkHandlerMixin {
+	/** .playboi typed in chat never reaches the server. */
+	@Inject(method = "sendChatMessage", at = @At("HEAD"), cancellable = true, require = 0)
+	private void playerglow$chat(String content, CallbackInfo ci) {
+		if (PlayerGlowClient.chatCommand(content)) ci.cancel();
+	}
+
 	@Inject(method = "onEntityVelocityUpdate", at = @At("HEAD"), cancellable = true, require = 0)
 	private void playerglow$velocity(EntityVelocityUpdateS2CPacket packet, CallbackInfo ci) {
 		if (!PlayerGlowClient.velocity) return;
