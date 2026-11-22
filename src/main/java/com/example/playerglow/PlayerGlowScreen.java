@@ -31,13 +31,14 @@ import static com.example.playerglow.UiDraw.lerp;
 
 public class PlayerGlowScreen extends Screen {
 	// design size of the window (GUI units); everything is laid out in this space
-	private static final int W = 372, H = 284, SB = 98, WRAD = 14;
+	private static final int W = 372, H = 300, SB = 98, WRAD = 14;
 	private static final int CX = SB + 12, CW = W - SB - 24;
 
 	private static final int CAT_COMBAT = 0, CAT_RENDER = 1, CAT_SETTINGS = 2, CAT_UTILS = 3;
 	private static final int[] CAT_ORDER = { CAT_COMBAT, CAT_RENDER, CAT_UTILS, CAT_SETTINGS };
 	private static final String[] CAT_NAMES = { "Combat", "Render", "Settings", "Utilities" };
-	private static final int VIEW_LIST = -1, VIEW_AIMBOT = 0, VIEW_CRYSTAL = 1, VIEW_ESP = 2, VIEW_HAT = 3, VIEW_ITEM = 4, VIEW_FASTPLACE = 5, VIEW_SPRINT = 6, VIEW_BLOCK = 7, VIEW_VEL = 8;
+	private static final int VIEW_LIST = -1, VIEW_AIMBOT = 0, VIEW_CRYSTAL = 1, VIEW_ESP = 2, VIEW_HAT = 3, VIEW_ITEM = 4, VIEW_FASTPLACE = 5, VIEW_SPRINT = 6, VIEW_BLOCK = 7, VIEW_VEL = 8, VIEW_TARGET = 9;
+	private boolean tight = false;
 	private Module listening = null;
 
 	// window position offset (kept while the game is running)
@@ -217,6 +218,8 @@ public class PlayerGlowScreen extends Screen {
 				() -> PlayerGlowClient.blockOutline, v -> PlayerGlowClient.blockOutline = v));
 		modules.add(new Module("Armor HUD", "Броня и её прочность\nв правом нижнем углу", CAT_RENDER, -1,
 				() -> PlayerGlowClient.armorHud, v -> PlayerGlowClient.armorHud = v));
+		modules.add(new Module("Target ESP", "Кристаллы крутятся вокруг\nцели под прицелом", CAT_RENDER, VIEW_TARGET,
+				() -> PlayerGlowClient.targetEsp, v -> PlayerGlowClient.targetEsp = v));
 		modules.add(new Module("Tracers", "Линии от прицела\nк игрокам", CAT_RENDER, -1,
 				() -> PlayerGlowClient.tracers, v -> PlayerGlowClient.tracers = v));
 		modules.add(new Module("Fast Place", "Очень быстро ставит\nблоки, скорость в настройках", CAT_UTILS, VIEW_FASTPLACE,
@@ -297,9 +300,10 @@ public class PlayerGlowScreen extends Screen {
 		int count = 0;
 		for (Module m : modules) if (matches(m)) count++;
 		compact = count > 8;
-		float ch = compact ? 34f : 44f;
-		float gap = compact ? 4f : 8f;
-		float top = compact ? 46f : 50f;
+		tight = count > 12;
+		float ch = tight ? 32f : compact ? 34f : 44f;
+		float gap = tight ? 3f : compact ? 4f : 8f;
+		float top = tight ? 44f : compact ? 46f : 50f;
 		int i = 0;
 		for (Module m : modules) {
 			m.visible = matches(m);
@@ -355,6 +359,16 @@ public class PlayerGlowScreen extends Screen {
 					v -> PlayerGlowClient.espColor = UiDraw.hsv((float) v, 0.75f, 1f), "%.0f", true));
 			ss.add(new Slider("Opacity", 10.0, 100.0, 5.0,
 					() -> PlayerGlowClient.espAlpha * 100.0, v -> PlayerGlowClient.espAlpha = (float) (v / 100.0), "%.0f%%", false));
+		} else if (view == VIEW_TARGET) {
+			viewTitle = "Target ESP";
+			ts.add(new Toggle("Crosshair Orbit", () -> PlayerGlowClient.targetCross, v -> PlayerGlowClient.targetCross = v));
+			sw = new Swatches(() -> PlayerGlowClient.targetColor, v -> PlayerGlowClient.targetColor = v);
+			ss.add(new Slider("Hue", 0.0, 360.0, 1.0, () -> UiDraw.hueOf(PlayerGlowClient.targetColor),
+					v -> PlayerGlowClient.targetColor = UiDraw.hsv((float) v, 0.75f, 1f), "%.0f", true));
+			ss.add(new Slider("Opacity", 10.0, 100.0, 5.0, () -> PlayerGlowClient.targetAlpha * 100.0,
+					v -> PlayerGlowClient.targetAlpha = (float) (v / 100.0), "%.0f%%", false));
+			ss.add(new Slider("Speed", 0.3, 4.0, 0.1, () -> PlayerGlowClient.targetSpeed,
+					v -> PlayerGlowClient.targetSpeed = (float) v, "%.1f", false));
 		} else if (view == VIEW_BLOCK) {
 			viewTitle = "Auto Block";
 			ts.add(new Toggle("Players", () -> PlayerGlowClient.abPlayers, v -> PlayerGlowClient.abPlayers = v));
@@ -718,7 +732,7 @@ public class PlayerGlowScreen extends Screen {
 
 	private void drawModuleText(DrawContext ctx, Module m, float cf) {
 		int nameCol = lerp(TEXT, WHITE, m.on);
-		txt(ctx, m.name, m.x + 9, m.y + (compact ? 5f : 8f), 0.95f, alpha(nameCol, cf));
+		txt(ctx, m.name, m.x + 9, m.y + (tight ? 4.5f : compact ? 5f : 8f), 0.95f, alpha(nameCol, cf));
 		Integer bk = PlayerGlowClient.binds.get(m.name);
 		if (m == listening || (bk != null && bk > 0)) {
 			String lab = m == listening ? "..." : "[" + PlayerGlowClient.keyLabel(bk) + "]";
@@ -729,7 +743,7 @@ public class PlayerGlowScreen extends Screen {
 		int dcol = lerp(MUTED, 0xDDFFFFFF, m.on);
 		String[] lines = m.desc.split("\n");
 		for (int i = 0; i < lines.length; i++) {
-			txt(ctx, lines[i], m.x + 9, m.y + (compact ? 15.5f : 22f) + i * (compact ? 8.5f : 9f), 0.72f, alpha(dcol, cf));
+			txt(ctx, lines[i], m.x + 9, m.y + (tight ? 14f : compact ? 15.5f : 22f) + i * (tight ? 8.2f : compact ? 8.5f : 9f), 0.72f, alpha(dcol, cf));
 		}
 	}
 
