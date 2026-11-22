@@ -37,7 +37,7 @@ public class PlayerGlowScreen extends Screen {
 	private static final int CAT_COMBAT = 0, CAT_RENDER = 1, CAT_SETTINGS = 2, CAT_UTILS = 3;
 	private static final int[] CAT_ORDER = { CAT_COMBAT, CAT_RENDER, CAT_UTILS, CAT_SETTINGS };
 	private static final String[] CAT_NAMES = { "Combat", "Render", "Settings", "Utilities" };
-	private static final int VIEW_LIST = -1, VIEW_AIMBOT = 0, VIEW_CRYSTAL = 1, VIEW_ESP = 2, VIEW_HAT = 3, VIEW_ITEM = 4, VIEW_FASTPLACE = 5, VIEW_SPRINT = 6;
+	private static final int VIEW_LIST = -1, VIEW_AIMBOT = 0, VIEW_CRYSTAL = 1, VIEW_ESP = 2, VIEW_HAT = 3, VIEW_ITEM = 4, VIEW_FASTPLACE = 5, VIEW_SPRINT = 6, VIEW_BLOCK = 7, VIEW_VEL = 8;
 	private Module listening = null;
 
 	// window position offset (kept while the game is running)
@@ -182,6 +182,12 @@ public class PlayerGlowScreen extends Screen {
 				() -> PlayerGlowClient.triggerbot, v -> PlayerGlowClient.triggerbot = v));
 		modules.add(new Module("Auto Totem", "Сам кладёт тотем\nбессмертия в левую руку", CAT_COMBAT, -1,
 				() -> PlayerGlowClient.autoTotem, v -> PlayerGlowClient.autoTotem = v));
+		modules.add(new Module("Auto Weapon", "Берёт лучший меч или\nтопор, когда смотришь на цель", CAT_COMBAT, -1,
+				() -> PlayerGlowClient.autoWeapon, v -> PlayerGlowClient.autoWeapon = v));
+		modules.add(new Module("Auto Block", "Поднимает щит, когда\nрядом враг", CAT_COMBAT, VIEW_BLOCK,
+				() -> PlayerGlowClient.autoBlock, v -> PlayerGlowClient.autoBlock = v));
+		modules.add(new Module("Velocity", "Уменьшает отбрасывание\nот ударов", CAT_COMBAT, VIEW_VEL,
+				() -> PlayerGlowClient.velocity, v -> PlayerGlowClient.velocity = v));
 		modules.add(new Module("Criticals", "Каждый удар\nстановится критом", CAT_COMBAT, -1,
 				() -> PlayerGlowClient.criticals, v -> PlayerGlowClient.criticals = v));
 		modules.add(new Module("Auto Shift", "Приседает после удара\nпо мобу или игроку", CAT_COMBAT, -1,
@@ -209,6 +215,8 @@ public class PlayerGlowScreen extends Screen {
 				() -> PlayerGlowClient.itemEsp, v -> PlayerGlowClient.itemEsp = v));
 		modules.add(new Module("Block Outline", "Белая подсветка блока\nна который смотришь", CAT_RENDER, -1,
 				() -> PlayerGlowClient.blockOutline, v -> PlayerGlowClient.blockOutline = v));
+		modules.add(new Module("Armor HUD", "Броня и её прочность\nв правом нижнем углу", CAT_RENDER, -1,
+				() -> PlayerGlowClient.armorHud, v -> PlayerGlowClient.armorHud = v));
 		modules.add(new Module("Tracers", "Линии от прицела\nк игрокам", CAT_RENDER, -1,
 				() -> PlayerGlowClient.tracers, v -> PlayerGlowClient.tracers = v));
 		modules.add(new Module("Fast Place", "Очень быстро ставит\nблоки, скорость в настройках", CAT_UTILS, VIEW_FASTPLACE,
@@ -347,6 +355,15 @@ public class PlayerGlowScreen extends Screen {
 					v -> PlayerGlowClient.espColor = UiDraw.hsv((float) v, 0.75f, 1f), "%.0f", true));
 			ss.add(new Slider("Opacity", 10.0, 100.0, 5.0,
 					() -> PlayerGlowClient.espAlpha * 100.0, v -> PlayerGlowClient.espAlpha = (float) (v / 100.0), "%.0f%%", false));
+		} else if (view == VIEW_BLOCK) {
+			viewTitle = "Auto Block";
+			ts.add(new Toggle("Players", () -> PlayerGlowClient.abPlayers, v -> PlayerGlowClient.abPlayers = v));
+			ts.add(new Toggle("Mobs", () -> PlayerGlowClient.abMobs, v -> PlayerGlowClient.abMobs = v));
+			ss.add(new Slider("Range", 2.0, 6.0, 0.5, () -> PlayerGlowClient.abRange, v -> PlayerGlowClient.abRange = (float) v, "%.1f", false));
+		} else if (view == VIEW_VEL) {
+			viewTitle = "Velocity";
+			ss.add(new Slider("Horizontal", 0.0, 100.0, 5.0, () -> PlayerGlowClient.velH, v -> PlayerGlowClient.velH = (float) v, "%.0f%%", false));
+			ss.add(new Slider("Vertical", 0.0, 100.0, 5.0, () -> PlayerGlowClient.velV, v -> PlayerGlowClient.velV = (float) v, "%.0f%%", false));
 		} else if (view == VIEW_SPRINT) {
 			viewTitle = "Auto Sprint";
 			ts.add(new Toggle("Stop sprint on hit", () -> PlayerGlowClient.sprintStopOnHit, v -> PlayerGlowClient.sprintStopOnHit = v));
